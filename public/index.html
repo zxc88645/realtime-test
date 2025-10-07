@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC vs WebSocket Latency Lab</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>WebRTC vs WebSocket Latency Lab</h1>
+      <p>
+        Use this page to compare the round-trip latency of messages sent through a
+        WebSocket connection and a WebRTC data channel. Click
+        <strong>Start test</strong> to open both transports and watch the live
+        metrics update.
+      </p>
+
+      <button id="start">Start test</button>
+
+      <section class="results" id="ws-result">
+        <h2>WebSocket</h2>
+        <dl>
+          <div>
+            <dt>Status</dt>
+            <dd class="status">Idle</dd>
+          </div>
+          <div>
+            <dt>Latest latency</dt>
+            <dd class="latest">–</dd>
+          </div>
+          <div>
+            <dt>Average latency</dt>
+            <dd class="average">–</dd>
+          </div>
+          <div>
+            <dt>Samples</dt>
+            <dd class="samples">0</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="results" id="webrtc-result">
+        <h2>WebRTC Data Channel</h2>
+        <dl>
+          <div>
+            <dt>Status</dt>
+            <dd class="status">Idle</dd>
+          </div>
+          <div>
+            <dt>Latest latency</dt>
+            <dd class="latest">–</dd>
+          </div>
+          <div>
+            <dt>Average latency</dt>
+            <dd class="average">–</dd>
+          </div>
+          <div>
+            <dt>Samples</dt>
+            <dd class="samples">0</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="notes">
+        <h2>How it works</h2>
+        <ol>
+          <li>
+            The server offers both a WebSocket endpoint and a WebRTC peer that
+            echoes any JSON payload tagged as a latency <code>ping</code>.
+          </li>
+          <li>
+            The page opens both transports, sends timestamped payloads once per
+            second, and computes round-trip latency using
+            <code>performance.now()</code>.
+          </li>
+          <li>
+            Because both transports share the same host and echo logic, the
+            numbers highlight the protocol differences rather than app logic.
+          </li>
+        </ol>
+      </section>
+    </main>
+    <script src="app.js" type="module"></script>
+  </body>
+</html>

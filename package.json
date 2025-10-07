@@ -1,0 +1,16 @@
+{
+  "name": "realtime-transport-comparison",
+  "version": "1.0.0",
+  "description": "Demo project comparing WebRTC data channels and WebSocket latency",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-pre-gyp": "^0.17.0",
+    "wrtc": "^0.4.7",
+    "ws": "^8.16.0"
+  }
+}
