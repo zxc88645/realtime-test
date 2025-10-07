@@ -1,54 +1,40 @@
-# WebRTC vs WebSocket Latency Lab
+# GPT Realtime Latency Lab
 
-This project spins up a small Node.js server that exposes both a WebSocket echo
-endpoint and a WebRTC data-channel peer. The included web UI negotiates both
-transports, sends timestamped `ping` payloads every second, and compares the
-round-trip latency so you can see how each protocol performs in your
-environment.
+This project spins up a small Node.js server that exposes a WebSocket bridge and
+an endpoint for minting WebRTC ephemeral keys so you can connect to OpenAI's
+Realtime API from the browser. The web UI negotiates both transports, sends your
+prompt to GPT through each one, and compares the round-trip latency so you can
+see how they perform in your environment.
 
 ## Prerequisites
 
-- Node.js 18 or newer (required for the `wrtc` native bindings)
+- Node.js 18 or newer (required for native `fetch` and browser-compatible APIs)
 - npm
+- An OpenAI API key with access to the Realtime API
 
 ## Getting started
 
 ```bash
 npm install
-npm start
+OPENAI_API_KEY=sk-your-key npm start
 ```
 
 Once the server is running, open `http://localhost:3000` in a modern browser and
-press **Start test**. The dashboard will show live latency metrics for both
-transports.
+press **Connect**. After the connections are ready, type a message and press
+**Send**. The dashboard will show GPT's replies for both transports and update
+the latency metrics in real time.
 
 ## How it works
 
-- `server.js` serves the static assets in `public/`, terminates WebSocket
-  connections at `/openai/agents/realtime/ws`, and negotiates WebRTC answers via
-  a REST endpoint at `/openai/agents/realtime/webrtc-offer` using the
-  [`wrtc`](https://github.com/node-webrtc/node-webrtc) library.
-- `public/app.js` opens both transports, schedules a timestamped JSON payload
-  every second, and computes the round-trip latency when the echo arrives back.
-- `public/styles.css` and `public/index.html` provide a simple dashboard so you
-  can compare the numbers at a glance.
+- `server.js` serves the static assets in `public/`, proxies WebSocket traffic
+to `wss://api.openai.com/v1/realtime`, and exposes an endpoint that creates
+short-lived WebRTC session tokens via `POST /v1/realtime/sessions`.
+- `public/app.js` opens both transports, dispatches identical
+  `response.create` events when you submit a prompt, and records the latency from
+  send time to the model's `response.completed` event.
+- `public/styles.css` and `public/index.html` provide a dashboard that lets you
+  compare the two conversations and latency measurements side by side.
 
-Because both transports run against the same server-side echo logic, the
-comparison focuses on the underlying protocol behavior (connection time, jitter,
-round-trip time) instead of app-specific processing.
-
-## Where to put your OpenAI API key
-
-The demo server is self-contained and does not make outbound calls to OpenAI,
-so you do not need an API key to run the latency lab locally. If you adapt this
-project to call OpenAI services, add your credentials to a `.env` file (or set
-them in the shell) using the standard `OPENAI_API_KEY` environment variable:
-
-```bash
-cp .env.example .env
-echo "OPENAI_API_KEY=sk-your-key" >> .env
-```
-
-The `.env` file is already ignored by Git, so your key will remain local to your
-machine. You can keep `.env.example` committed to share the required variable
-names with collaborators without leaking secrets.
+Because both transports route to the same GPT session logic, the comparison
+highlights connection time, jitter, and round-trip performance differences
+between the protocols instead of app-specific processing.

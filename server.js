@@ -1,14 +1,17 @@
 const express = require('express');
 const http = require('http');
 const path = require('path');
-const { WebSocketServer } = require('ws');
-const { RTCPeerConnection } = require('wrtc');
+const { WebSocketServer, WebSocket } = require('ws');
 
 const PORT = process.env.PORT || 3000;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_REALTIME_MODEL =
+  process.env.OPENAI_REALTIME_MODEL || 'gpt-4o-realtime-preview-2024-12-17';
+const OPENAI_REALTIME_BASE_URL = 'https://api.openai.com/v1/realtime';
 
 const REALTIME_PATH = '/openai/agents/realtime';
 const REALTIME_WS_PATH = `${REALTIME_PATH}/ws`;
-const REALTIME_WEBRTC_PATH = `${REALTIME_PATH}/webrtc-offer`;
+const REALTIME_EPHEMERAL_PATH = `${REALTIME_PATH}/ephemeral-token`;
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -18,28 +21,105 @@ const server = http.createServer(app);
 
 const webSocketServer = new WebSocketServer({ noServer: true });
 
-webSocketServer.on('connection', (socket) => {
+webSocketServer.on('connection', (clientSocket) => {
   console.log('WebSocket client connected');
-  socket.on('message', (message) => {
+
+  if (!OPENAI_API_KEY) {
+    clientSocket.send(
+      JSON.stringify({
+        type: 'error',
+        error: { message: 'Server is missing OPENAI_API_KEY' },
+      })
+    );
+    clientSocket.close();
+    return;
+  }
+
+  const upstreamUrl = `${OPENAI_REALTIME_BASE_URL}?model=${encodeURIComponent(
+    OPENAI_REALTIME_MODEL
+  )}`;
+  const upstream = new WebSocket(upstreamUrl, {
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      'OpenAI-Beta': 'realtime=v1',
+    },
+  });
+
+  const pendingMessages = [];
+
+  upstream.on('open', () => {
+    console.log('Connected to OpenAI realtime WebSocket');
     try {
-      const data = JSON.parse(message.toString());
-      if (data.type === 'ping') {
-        socket.send(
-          JSON.stringify({
-            type: 'pong',
-            id: data.id,
-            clientSentTs: data.clientSentTs,
-            serverReceivedTs: Date.now(),
-          })
-        );
-      }
+      clientSocket.send(
+        JSON.stringify({ type: 'server.status', status: 'Connected to OpenAI' })
+      );
     } catch (error) {
-      console.error('Invalid message received on WebSocket', error);
+      console.warn('Failed to send status message to client', error);
+    }
+    while (pendingMessages.length && upstream.readyState === WebSocket.OPEN) {
+      upstream.send(pendingMessages.shift());
     }
   });
 
-  socket.on('close', () => {
+  upstream.on('message', (message) => {
+    if (clientSocket.readyState === WebSocket.OPEN) {
+      clientSocket.send(message);
+    }
+  });
+
+  upstream.on('close', (code, reason) => {
+    const readableReason = Buffer.isBuffer(reason)
+      ? reason.toString('utf8')
+      : typeof reason === 'string'
+      ? reason
+      : '';
+    console.log('Upstream WebSocket closed', code, readableReason);
+    if (clientSocket.readyState === WebSocket.OPEN) {
+      clientSocket.send(
+        JSON.stringify({
+          type: 'server.status',
+          status: readableReason || 'OpenAI connection closed',
+          code,
+        })
+      );
+      clientSocket.close();
+    }
+  });
+
+  upstream.on('error', (error) => {
+    console.error('Upstream WebSocket error', error);
+    if (clientSocket.readyState === WebSocket.OPEN) {
+      clientSocket.send(
+        JSON.stringify({
+          type: 'error',
+          error: { message: 'OpenAI realtime connection failed.' },
+        })
+      );
+      clientSocket.close();
+    }
+  });
+
+  clientSocket.on('message', (message) => {
+    if (upstream.readyState === WebSocket.OPEN) {
+      upstream.send(message);
+    } else if (upstream.readyState === WebSocket.CONNECTING) {
+      pendingMessages.push(message);
+    }
+  });
+
+  clientSocket.on('close', () => {
     console.log('WebSocket client disconnected');
+    pendingMessages.length = 0;
+    if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
+      upstream.close();
+    }
+  });
+
+  clientSocket.on('error', (error) => {
+    console.error('Client WebSocket error', error);
+    if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
+      upstream.close();
+    }
   });
 });
 
@@ -61,100 +141,44 @@ server.on('upgrade', (request, socket, head) => {
   }
 });
 
-const activePeerConnections = new Set();
-
-function cleanupPeerConnection(peerConnection) {
-  try {
-    peerConnection.close();
-  } catch (error) {
-    console.warn('Error closing peer connection', error);
-  }
-  activePeerConnections.delete(peerConnection);
-}
-
-app.post(REALTIME_WEBRTC_PATH, async (req, res) => {
-  const offer = req.body;
-  if (!offer || !offer.sdp || !offer.type) {
-    res.status(400).json({ error: 'Invalid SDP offer' });
+app.post(REALTIME_EPHEMERAL_PATH, async (_req, res) => {
+  if (!OPENAI_API_KEY) {
+    res.status(500).json({ error: 'Server is missing OPENAI_API_KEY' });
     return;
   }
 
-  const peerConnection = new RTCPeerConnection();
-  activePeerConnections.add(peerConnection);
-
-  peerConnection.onconnectionstatechange = () => {
-    const state = peerConnection.connectionState;
-    console.log('Peer connection state changed:', state);
-    if (['disconnected', 'failed', 'closed'].includes(state)) {
-      cleanupPeerConnection(peerConnection);
-    }
-  };
-
-  peerConnection.ondatachannel = (event) => {
-    const channel = event.channel;
-    channel.onmessage = (messageEvent) => {
-      try {
-        const data = JSON.parse(messageEvent.data);
-        if (data.type === 'ping') {
-          channel.send(
-            JSON.stringify({
-              type: 'pong',
-              id: data.id,
-              clientSentTs: data.clientSentTs,
-              serverReceivedTs: Date.now(),
-            })
-          );
-        }
-      } catch (error) {
-        console.error('Invalid message received on data channel', error);
-      }
-    };
-
-    channel.onclose = () => {
-      console.log('Data channel closed');
-      cleanupPeerConnection(peerConnection);
-    };
-  };
-
   try {
-    await peerConnection.setRemoteDescription(offer);
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-
-    await new Promise((resolve) => {
-      if (peerConnection.iceGatheringState === 'complete') {
-        resolve();
-        return;
-      }
-
-      const checkState = () => {
-        if (peerConnection.iceGatheringState === 'complete') {
-          peerConnection.removeEventListener('icegatheringstatechange', checkState);
-          resolve();
-        }
-      };
-
-      peerConnection.addEventListener('icegatheringstatechange', checkState);
-      setTimeout(() => {
-        peerConnection.removeEventListener('icegatheringstatechange', checkState);
-        resolve();
-      }, 2000);
+    const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: OPENAI_REALTIME_MODEL,
+        voice: 'verse',
+      }),
     });
 
-    res.json(peerConnection.localDescription);
-  } catch (error) {
-    console.error('Failed to handle WebRTC offer', error);
-    cleanupPeerConnection(peerConnection);
-    res.status(500).json({ error: 'Failed to process WebRTC offer' });
-  }
-});
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Failed to create ephemeral session', response.status, errorText);
+      res
+        .status(response.status)
+        .json({ error: 'Failed to create ephemeral session', details: errorText });
+      return;
+    }
 
-process.on('SIGINT', () => {
-  console.log('Shutting down, closing peer connections');
-  activePeerConnections.forEach((peerConnection) => {
-    cleanupPeerConnection(peerConnection);
-  });
-  server.close(() => process.exit(0));
+    const data = await response.json();
+    res.json({
+      id: data.id,
+      client_secret: data.client_secret,
+      expires_at: data.client_secret?.expires_at ?? null,
+    });
+  } catch (error) {
+    console.error('Error creating ephemeral session', error);
+    res.status(500).json({ error: 'Error creating ephemeral session' });
+  }
 });
 
 server.listen(PORT, () => {
