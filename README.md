@@ -25,9 +25,9 @@ transports.
 ## How it works
 
 - `server.js` serves the static assets in `public/`, terminates WebSocket
-  connections at `/ws`, and negotiates WebRTC answers via a REST endpoint at
-  `/webrtc-offer` using the [`wrtc`](https://github.com/node-webrtc/node-webrtc)
-  library.
+  connections at `/openai/agents/realtime/ws`, and negotiates WebRTC answers via
+  a REST endpoint at `/openai/agents/realtime/webrtc-offer` using the
+  [`wrtc`](https://github.com/node-webrtc/node-webrtc) library.
 - `public/app.js` opens both transports, schedules a timestamped JSON payload
   every second, and computes the round-trip latency when the echo arrives back.
 - `public/styles.css` and `public/index.html` provide a simple dashboard so you
@@ -36,3 +36,19 @@ transports.
 Because both transports run against the same server-side echo logic, the
 comparison focuses on the underlying protocol behavior (connection time, jitter,
 round-trip time) instead of app-specific processing.
+
+## Where to put your OpenAI API key
+
+The demo server is self-contained and does not make outbound calls to OpenAI,
+so you do not need an API key to run the latency lab locally. If you adapt this
+project to call OpenAI services, add your credentials to a `.env` file (or set
+them in the shell) using the standard `OPENAI_API_KEY` environment variable:
+
+```bash
+cp .env.example .env
+echo "OPENAI_API_KEY=sk-your-key" >> .env
+```
+
+The `.env` file is already ignored by Git, so your key will remain local to your
+machine. You can keep `.env.example` committed to share the required variable
+names with collaborators without leaking secrets.

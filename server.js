@@ -6,6 +6,10 @@ const { RTCPeerConnection } = require('wrtc');
 
 const PORT = process.env.PORT || 3000;
 
+const REALTIME_PATH = '/openai/agents/realtime';
+const REALTIME_WS_PATH = `${REALTIME_PATH}/ws`;
+const REALTIME_WEBRTC_PATH = `${REALTIME_PATH}/webrtc-offer`;
+
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -40,7 +44,15 @@ webSocketServer.on('connection', (socket) => {
 });
 
 server.on('upgrade', (request, socket, head) => {
-  if (request.url === '/ws') {
+  let pathname;
+  try {
+    ({ pathname } = new URL(request.url, `http://${request.headers.host}`));
+  } catch (error) {
+    socket.destroy();
+    return;
+  }
+
+  if (pathname === REALTIME_WS_PATH) {
     webSocketServer.handleUpgrade(request, socket, head, (socket) => {
       webSocketServer.emit('connection', socket, request);
     });
@@ -60,7 +72,7 @@ function cleanupPeerConnection(peerConnection) {
   activePeerConnections.delete(peerConnection);
 }
 
-app.post('/webrtc-offer', async (req, res) => {
+app.post(REALTIME_WEBRTC_PATH, async (req, res) => {
   const offer = req.body;
   if (!offer || !offer.sdp || !offer.type) {
     res.status(400).json({ error: 'Invalid SDP offer' });

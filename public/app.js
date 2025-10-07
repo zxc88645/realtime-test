@@ -34,7 +34,9 @@ async function startWebSocketTest(tracker) {
   tracker.setStatus('Connecting…');
 
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(`${protocol}//${location.host}/ws`);
+  const ws = new WebSocket(
+    `${protocol}//${location.host}/openai/agents/realtime/ws`
+  );
 
   const inflight = new Map();
 
@@ -134,7 +136,7 @@ async function startWebRTCTest(tracker) {
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
 
-    const response = await fetch('/webrtc-offer', {
+    const response = await fetch('/openai/agents/realtime/webrtc-offer', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(peerConnection.localDescription),
