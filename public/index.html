@@ -3,20 +3,46 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WebRTC vs WebSocket Latency Lab</title>
+    <title>GPT Realtime Latency Lab</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main>
-      <h1>WebRTC vs WebSocket Latency Lab</h1>
+      <h1>GPT Realtime Latency Lab</h1>
       <p>
-        Use this page to compare the round-trip latency of messages sent through a
-        WebSocket connection and a WebRTC data channel. Click
-        <strong>Start test</strong> to open both transports and watch the live
-        metrics update.
+        Click <strong>Connect</strong> to open both a WebSocket bridge and a WebRTC
+        data channel to OpenAI's Realtime API. Once connected, type a message and
+        send it to talk with GPT. Each transport reports the round-trip latency
+        between sending your request and receiving the model's completed reply.
       </p>
 
-      <button id="start">Start test</button>
+      <p class="api-note">
+        The demo server needs <code>OPENAI_API_KEY</code> in its environment to
+        proxy requests to OpenAI. Without it, the transports will fail with a
+        descriptive error.
+      </p>
+
+      <button id="start">Connect</button>
+
+      <form id="message-form" class="message-form">
+        <label for="message">Send a message to GPT once either transport is ready:</label>
+        <div class="message-controls">
+          <input
+            id="message"
+            name="message"
+            type="text"
+            placeholder="Ask GPT something…"
+            autocomplete="off"
+            required
+            disabled
+          />
+          <button id="send" type="submit" disabled>Send</button>
+        </div>
+        <p class="hint">
+          Your prompt is dispatched to both transports simultaneously so you can
+          compare their responses and latency.
+        </p>
+      </form>
 
       <section class="results" id="ws-result">
         <h2>WebSocket</h2>
@@ -38,6 +64,10 @@
             <dd class="samples">0</dd>
           </div>
         </dl>
+        <div class="chat">
+          <h3>Conversation</h3>
+          <div class="messages" aria-live="polite"></div>
+        </div>
       </section>
 
       <section class="results" id="webrtc-result">
@@ -60,23 +90,29 @@
             <dd class="samples">0</dd>
           </div>
         </dl>
+        <div class="chat">
+          <h3>Conversation</h3>
+          <div class="messages" aria-live="polite"></div>
+        </div>
       </section>
 
       <section class="notes">
         <h2>How it works</h2>
         <ol>
           <li>
-            The server offers both a WebSocket endpoint and a WebRTC peer that
-            echoes any JSON payload tagged as a latency <code>ping</code>.
+            The server proxies WebSocket connections to OpenAI's
+            <code>/v1/realtime</code> endpoint and can mint ephemeral keys for
+            browser-side WebRTC sessions.
           </li>
           <li>
-            The page opens both transports, sends timestamped payloads once per
-            second, and computes round-trip latency using
-            <code>performance.now()</code>.
+            When you send a message, both transports issue identical
+            <code>response.create</code> events so GPT receives the same prompt
+            twice.
           </li>
           <li>
-            Because both transports share the same host and echo logic, the
-            numbers highlight the protocol differences rather than app logic.
+            The page timestamps each request and records the time until GPT
+            signals the response is complete, updating the latency dashboard in
+            real time.
           </li>
         </ol>
       </section>
