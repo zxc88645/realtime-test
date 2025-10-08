@@ -7,7 +7,10 @@ function createRealtimeWebSocketHandler(options) {
     realtimeVoice,
     realtimeBaseUrl,
     webSocketImpl = WebSocket,
-    createUpstream = (url, config) => new webSocketImpl(url, config),
+    createUpstream = (url, protocols, config) =>
+      protocols
+        ? new webSocketImpl(url, protocols, config)
+        : new webSocketImpl(url, config),
   } = options;
 
   const READY_STATE = {
@@ -47,12 +50,23 @@ function createRealtimeWebSocketHandler(options) {
       upstreamUrl.searchParams.set('voice', realtimeVoice);
     }
 
-    const upstream = createUpstream(upstreamUrl.toString(), {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'OpenAI-Beta': 'realtime=v1',
-      },
-    });
+    const upstreamHeaders = {
+      Authorization: `Bearer ${apiKey}`,
+      'OpenAI-Beta': 'realtime=v1',
+    };
+    const upstreamConfig = { headers: upstreamHeaders };
+    const upstreamProtocols = ['realtime'];
+
+    const upstream =
+      typeof createUpstream === 'function' && createUpstream.length >= 3
+        ? createUpstream(upstreamUrl.toString(), upstreamProtocols, upstreamConfig)
+        : createUpstream(upstreamUrl.toString(), {
+            ...upstreamConfig,
+            headers: {
+              ...upstreamHeaders,
+              'Sec-WebSocket-Protocol': upstreamProtocols.join(', '),
+            },
+          });
 
     const pendingMessages = [];
 

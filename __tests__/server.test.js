@@ -185,7 +185,9 @@ describe('createRealtimeWebSocketHandler', () => {
 
     expect(createUpstream).toHaveBeenCalledWith(
       expect.stringContaining('model=test-model'),
-      expect.objectContaining({ headers: expect.any(Object) })
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'Sec-WebSocket-Protocol': 'realtime' }),
+      })
     );
 
     clientSocket.emit('message', 'queued-message');
@@ -207,5 +209,38 @@ describe('createRealtimeWebSocketHandler', () => {
       (item) => item.includes('"status"') && item.includes('bye')
     );
     expect(statusPayload).toBeTruthy();
+  });
+
+  test('自訂上游工廠會收到 realtime 子通訊協定', () => {
+    const upstreamSocket = new MockSocket();
+    const createUpstream = jest.fn((url, protocols, config) => {
+      expect(protocols).toEqual(['realtime']);
+      expect(config.headers.Authorization).toBe('Bearer key');
+      return upstreamSocket;
+    });
+
+    const handler = createRealtimeWebSocketHandler({
+      apiKey: 'key',
+      realtimeModel: 'test-model',
+      realtimeVoice: 'verse',
+      realtimeBaseUrl: 'wss://example',
+      webSocketImpl: MockSocket,
+      createUpstream,
+    });
+
+    const clientSocket = new MockSocket();
+    clientSocket.readyState = MockSocket.OPEN;
+    handler(clientSocket);
+
+    expect(createUpstream).toHaveBeenCalledWith(
+      expect.stringContaining('voice=verse'),
+      ['realtime'],
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer key',
+          'OpenAI-Beta': 'realtime=v1',
+        }),
+      })
+    );
   });
 });
