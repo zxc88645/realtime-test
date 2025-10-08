@@ -19,8 +19,7 @@ function createRealtimeServer(options = {}) {
     apiKey: config.apiKey,
     realtimeModel: config.realtimeModel,
     realtimeVoice: config.realtimeVoice,
-    realtimeBaseUrl: config.realtimeBaseUrl,
-    fetchImpl: config.fetchImpl,
+    createOpenAIClient: config.createOpenAIClient,
   });
 
   const server = http.createServer(app);

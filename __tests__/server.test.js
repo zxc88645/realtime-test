@@ -73,29 +73,28 @@ describe('createRealtimeServer', () => {
   });
 
   test('成功取得短效金鑰時回傳資料', async () => {
-    const fakeFetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        id: 'session-id',
-        client_secret: { value: 'secret-token', expires_at: 1234567890 },
-      }),
-      text: async () => '',
-    });
+    const fakeClient = {
+      realtime: {
+        clientSecrets: {
+          create: jest.fn().mockResolvedValue({
+            id: 'session-id',
+            client_secret: { value: 'secret-token', expires_at: 1234567890 },
+          }),
+        },
+      },
+    };
+
+    const createOpenAIClient = jest.fn(() => fakeClient);
 
     const { app, server } = createRealtimeServer({
       apiKey: 'test-key',
-      fetchImpl: fakeFetch,
+      createOpenAIClient,
     });
 
     const response = await request(app).post(REALTIME_EPHEMERAL_PATH);
 
-    expect(fakeFetch).toHaveBeenCalledWith(
-      'https://api.openai.com/v1/realtime/sessions',
-      expect.objectContaining({ method: 'POST' })
-    );
-    const [, fetchOptions] = fakeFetch.mock.calls[0];
-    const requestBody = JSON.parse(fetchOptions.body);
-    expect(requestBody).toEqual({
+    expect(createOpenAIClient).toHaveBeenCalled();
+    expect(fakeClient.realtime.clientSecrets.create).toHaveBeenCalledWith({
       model: DEFAULT_REALTIME_MODEL,
       voice: DEFAULT_REALTIME_VOICE,
     });
@@ -116,20 +115,29 @@ describe('createRealtimeServer', () => {
   });
 
   test('上游回應錯誤時回報詳細訊息', async () => {
-    const fakeFetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      text: async () => 'unauthorized',
-    });
+    const upstreamError = new Error('unauthorized');
+    upstreamError.status = 401;
+    upstreamError.error = { message: 'unauthorized' };
+
+    const fakeClient = {
+      realtime: {
+        clientSecrets: {
+          create: jest.fn().mockRejectedValue(upstreamError),
+        },
+      },
+    };
+
+    const createOpenAIClient = jest.fn(() => fakeClient);
 
     const { app, server } = createRealtimeServer({
       apiKey: 'test-key',
-      fetchImpl: fakeFetch,
+      createOpenAIClient,
     });
 
     const response = await request(app).post(REALTIME_EPHEMERAL_PATH);
 
-    expect(fakeFetch).toHaveBeenCalled();
+    expect(createOpenAIClient).toHaveBeenCalled();
+    expect(fakeClient.realtime.clientSecrets.create).toHaveBeenCalled();
     expect(response.status).toBe(401);
     expect(response.body).toEqual({
       error: '建立短效會話失敗',
