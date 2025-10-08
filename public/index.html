@@ -11,22 +11,44 @@
       <main>
         <h1>GPT 即時延遲實驗室</h1>
         <p>
-          按下 <strong>連線</strong> 以建立前往 OpenAI Realtime API 的 WebSocket 橋接與
-          WebRTC 資料通道。連線成功後輸入訊息並送出，就能同時透過 兩種傳輸方式與 GPT
-          對話，並比較從送出到完成回覆的往返延遲。
+          按下 <strong>連線</strong> 以前，請先選擇要使用的傳輸模式。成功連線後輸入訊息並
+          送出，就能透過所選模式與 GPT 對話並觀察往返延遲。每次只能有一種通話模式處於
+          連線狀態。
         </p>
 
         <p class="api-note">
           範例伺服器需要在環境變數中設定 <code>OPENAI_API_KEY</code> 才能代理 前往
-          OpenAI。若缺少金鑰，兩種傳輸都會回報明確的錯誤。
+          OpenAI。若缺少金鑰，選定的傳輸模式會回報明確的錯誤。
         </p>
+
+        <section class="mode-selector">
+          <h2>選擇通話模式</h2>
+          <fieldset>
+            <legend class="visually-hidden">可用的連線模式</legend>
+            <div class="mode-options">
+              <label v-for="option in modeOptions" :key="option.id" class="mode-option">
+                <input
+                  type="radio"
+                  name="mode"
+                  :value="option.id"
+                  v-model="selectedMode"
+                />
+                <span class="mode-info">
+                  <span class="mode-name">{{ option.label }}</span>
+                  <span class="mode-description">{{ option.description }}</span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+          <p class="hint">切換模式會立即結束目前的連線，需重新按下「連線」。</p>
+        </section>
 
         <button id="start" type="button" @click="onStartClick" :disabled="startDisabled">
           {{ startLabel }}
         </button>
 
         <form id="message-form" class="message-form" @submit.prevent="sendMessage">
-          <label for="message">任一傳輸準備就緒後，傳訊給 GPT：</label>
+          <label for="message">{{ activeModeLabel }} 準備就緒後，傳訊給 GPT：</label>
           <div class="message-controls">
             <input
               id="message"
@@ -41,34 +63,34 @@
             />
             <button id="send" type="submit" :disabled="!canSend">送出</button>
           </div>
-          <p class="hint">你的提示會同時送往兩種傳輸，以便比較回應內容與延遲。</p>
+          <p class="hint">訊息只會送往當前選定的模式，並記錄往返延遲。</p>
         </form>
 
-        <section class="results" id="ws-result">
-          <h2>WebSocket</h2>
+        <section class="results" :id="`result-${activeTransport.id}`">
+          <h2>{{ activeModeLabel }}</h2>
           <dl>
             <div>
               <dt>狀態</dt>
-              <dd class="status">{{ ws.status }}</dd>
+              <dd class="status">{{ activeTransport.status }}</dd>
             </div>
             <div>
               <dt>最新延遲</dt>
-              <dd class="latest">{{ ws.latest }}</dd>
+              <dd class="latest">{{ activeTransport.latest }}</dd>
             </div>
             <div>
               <dt>平均延遲</dt>
-              <dd class="average">{{ ws.average }}</dd>
+              <dd class="average">{{ activeTransport.average }}</dd>
             </div>
             <div>
               <dt>樣本數</dt>
-              <dd class="samples">{{ ws.samples }}</dd>
+              <dd class="samples">{{ activeTransport.samples }}</dd>
             </div>
           </dl>
           <div class="chat">
             <h3>對話內容</h3>
             <div class="messages" aria-live="polite">
               <div
-                v-for="item in ws.messages"
+                v-for="item in activeTransport.messages"
                 :key="item.id"
                 :class="['message', item.role]"
               >
@@ -77,45 +99,7 @@
                   <p class="message-text">{{ item.text || '（等待回覆…）' }}</p>
                 </div>
               </div>
-              <p v-if="!ws.messages.length" class="messages-empty">尚未傳送任何訊息。</p>
-            </div>
-          </div>
-        </section>
-
-        <section class="results" id="webrtc-result">
-          <h2>WebRTC 資料通道</h2>
-          <dl>
-            <div>
-              <dt>狀態</dt>
-              <dd class="status">{{ webrtc.status }}</dd>
-            </div>
-            <div>
-              <dt>最新延遲</dt>
-              <dd class="latest">{{ webrtc.latest }}</dd>
-            </div>
-            <div>
-              <dt>平均延遲</dt>
-              <dd class="average">{{ webrtc.average }}</dd>
-            </div>
-            <div>
-              <dt>樣本數</dt>
-              <dd class="samples">{{ webrtc.samples }}</dd>
-            </div>
-          </dl>
-          <div class="chat">
-            <h3>對話內容</h3>
-            <div class="messages" aria-live="polite">
-              <div
-                v-for="item in webrtc.messages"
-                :key="item.id"
-                :class="['message', item.role]"
-              >
-                <span class="message-role">{{ roleLabel(item.role) }}</span>
-                <div class="message-bubble">
-                  <p class="message-text">{{ item.text || '（等待回覆…）' }}</p>
-                </div>
-              </div>
-              <p v-if="!webrtc.messages.length" class="messages-empty">
+              <p v-if="!activeTransport.messages.length" class="messages-empty">
                 尚未傳送任何訊息。
               </p>
             </div>
@@ -130,12 +114,12 @@
               <code>/v1/realtime</code> 端點，並能簽發瀏覽器使用的 WebRTC 短效金鑰。
             </li>
             <li>
-              當你送出訊息時，兩種傳輸都會發送相同的
-              <code>response.create</code> 事件，讓 GPT 收到一致的提示。
+              當你送出訊息時，所選模式會發送 <code>response.create</code>
+              事件，讓 GPT 收到你的提示。
             </li>
             <li>
-              頁面會記錄每次請求的時間點，直到 GPT
-              宣告回覆完成為止，並即時更新延遲儀表板。
+              頁面會記錄每次請求的時間點，直到 GPT 宣告回覆完成為止，並即時更新延遲
+              儀表板。
             </li>
           </ol>
         </section>
