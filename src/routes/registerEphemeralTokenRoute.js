@@ -1,7 +1,8 @@
 const { REALTIME_EPHEMERAL_PATH } = require('../config/constants');
 
 function registerEphemeralTokenRoute(app, dependencies) {
-  const { apiKey, realtimeModel, realtimeBaseUrl, fetchImpl } = dependencies;
+  const { apiKey, realtimeModel, realtimeVoice, realtimeBaseUrl, fetchImpl } =
+    dependencies;
 
   app.post(REALTIME_EPHEMERAL_PATH, async (_req, res) => {
     if (!apiKey) {
@@ -18,7 +19,7 @@ function registerEphemeralTokenRoute(app, dependencies) {
         },
         body: JSON.stringify({
           model: realtimeModel,
-          voice: 'verse',
+          voice: realtimeVoice,
         }),
       });
 

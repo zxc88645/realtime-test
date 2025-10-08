@@ -18,6 +18,7 @@ function createRealtimeServer(options = {}) {
   registerEphemeralTokenRoute(app, {
     apiKey: config.apiKey,
     realtimeModel: config.realtimeModel,
+    realtimeVoice: config.realtimeVoice,
     realtimeBaseUrl: config.realtimeBaseUrl,
     fetchImpl: config.fetchImpl,
   });
@@ -28,6 +29,7 @@ function createRealtimeServer(options = {}) {
   const handleConnection = createRealtimeWebSocketHandler({
     apiKey: config.apiKey,
     realtimeModel: config.realtimeModel,
+    realtimeVoice: config.realtimeVoice,
     realtimeBaseUrl: config.realtimeBaseUrl,
   });
 
