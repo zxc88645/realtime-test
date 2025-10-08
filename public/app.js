@@ -37,6 +37,26 @@ const MODE_OPTIONS = [
   },
 ];
 
+const MESSAGE_BASE_CLASS =
+  'max-w-3xl rounded-3xl border px-5 py-4 text-sm leading-7 shadow-lg backdrop-blur';
+
+function messageContainerClass(role) {
+  if (role === 'user') {
+    return 'flex flex-col items-end gap-2 text-right';
+  }
+  return 'flex flex-col items-start gap-2';
+}
+
+function messageBubbleClass(role) {
+  if (role === 'user') {
+    return `${MESSAGE_BASE_CLASS} border-sky-500/50 bg-sky-500/20 text-sky-100 shadow-sky-900/40`;
+  }
+  if (role === 'error') {
+    return `${MESSAGE_BASE_CLASS} border-rose-500/40 bg-rose-500/15 text-rose-100 shadow-rose-900/30`;
+  }
+  return `${MESSAGE_BASE_CLASS} border-slate-700/60 bg-slate-800/70 text-slate-100 shadow-slate-950/40`;
+}
+
 function createTransportContext(id) {
   return reactive({
     id,
@@ -217,7 +237,7 @@ function handleRealtimeEvent(transport, event) {
   if (event.type === 'response.delta' || event.type === 'response.output_text.delta') {
     const fragment = extractDeltaText(event);
     if (fragment) {
-      entry.message.text += fragment;
+      entry.message.text = `${entry.message.text || ''}${fragment}`;
     }
   } else if (event.type === 'response.completed') {
     const finalText = extractCompletedText(event, entry.message.text);
@@ -255,30 +275,36 @@ async function parseEventData(data) {
   throw new Error('不支援的事件資料型別');
 }
 
-function buildResponseCreateEvent(text, clientMessageId) {
+function buildResponseCreateEvent(text, clientMessageId, options = {}) {
+  const { includeAudio = false } = options;
+  const response = {
+    metadata: {
+      client_message_id: clientMessageId,
+    },
+    modalities: includeAudio ? ['text', 'audio'] : ['text'],
+    input: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text,
+          },
+        ],
+      },
+    ],
+  };
+
+  if (includeAudio) {
+    response.audio = {
+      voice: REALTIME_VOICE,
+      format: 'pcm16',
+    };
+  }
+
   return {
     type: 'response.create',
-    response: {
-      metadata: {
-        client_message_id: clientMessageId,
-      },
-      modalities: ['text', 'audio'],
-      audio: {
-        voice: REALTIME_VOICE,
-        format: 'pcm16',
-      },
-      input: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'input_text',
-              text,
-            },
-          ],
-        },
-      ],
-    },
+    response,
   };
 }
 
@@ -634,7 +660,9 @@ function startWebSocketTransport(transport) {
       return false;
     }
     const clientMessageId = crypto.randomUUID();
-    const payload = JSON.stringify(buildResponseCreateEvent(message, clientMessageId));
+    const payload = JSON.stringify(
+      buildResponseCreateEvent(message, clientMessageId, { includeAudio: true })
+    );
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(payload);
     } else if (socket.readyState === WebSocket.CONNECTING) {
@@ -857,7 +885,11 @@ async function startWebRTCTransport(transport) {
       return false;
     }
     const clientMessageId = crypto.randomUUID();
-    channel.send(JSON.stringify(buildResponseCreateEvent(message, clientMessageId)));
+    channel.send(
+      JSON.stringify(
+        buildResponseCreateEvent(message, clientMessageId, { includeAudio: false })
+      )
+    );
     transport.pendingMessages.set(clientMessageId, {
       start: performance.now(),
     });
@@ -962,6 +994,8 @@ const app = createApp({
       onStartClick,
       sendMessage,
       roleLabel,
+      messageContainerClass,
+      messageBubbleClass,
     };
   },
 });
