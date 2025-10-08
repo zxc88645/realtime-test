@@ -1,5 +1,9 @@
 const path = require('path');
 
+const { loadEnvironment } = require('./loadEnvironment');
+
+loadEnvironment();
+
 const DEFAULT_PORT = Number(process.env.PORT) || 3000;
 const DEFAULT_API_KEY = process.env.OPENAI_API_KEY || null;
 const DEFAULT_REALTIME_MODEL =
