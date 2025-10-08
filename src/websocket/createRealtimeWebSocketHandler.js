@@ -17,9 +17,7 @@ function createRealtimeWebSocketHandler(options) {
       return;
     }
 
-    const upstreamUrl = `${realtimeBaseUrl}?model=${encodeURIComponent(
-      realtimeModel
-    )}`;
+    const upstreamUrl = `${realtimeBaseUrl}?model=${encodeURIComponent(realtimeModel)}`;
     const upstream = new WebSocket(upstreamUrl, {
       headers: {
         Authorization: `Bearer ${apiKey}`,

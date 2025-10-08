@@ -1,4 +1,9 @@
-import { createApp, computed, reactive, ref } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
+import {
+  createApp,
+  computed,
+  reactive,
+  ref,
+} from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
 
 const REALTIME_MODEL = 'gpt-4o-realtime-preview-2024-12-17';
 const REALTIME_BASE_URL = 'https://api.openai.com/v1/realtime';
@@ -44,7 +49,8 @@ function resetLatencies(transport) {
 function recordLatency(transport, duration) {
   transport.latencies.push(duration);
   const average =
-    transport.latencies.reduce((sum, value) => sum + value, 0) / transport.latencies.length;
+    transport.latencies.reduce((sum, value) => sum + value, 0) /
+    transport.latencies.length;
   transport.latest = `${duration.toFixed(2)} 毫秒`;
   transport.average = `${average.toFixed(2)} 毫秒`;
   transport.samples = transport.latencies.length;
@@ -489,7 +495,9 @@ const app = createApp({
       return hasAttemptedConnection.value ? '重新連線' : '連線';
     });
 
-    const startDisabled = computed(() => ws.isReady || webrtc.isReady || isConnecting.value);
+    const startDisabled = computed(
+      () => ws.isReady || webrtc.isReady || isConnecting.value
+    );
 
     const canSend = computed(() => ws.isReady || webrtc.isReady);
 

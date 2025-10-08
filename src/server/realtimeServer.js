@@ -5,7 +5,9 @@ const { buildConfig } = require('../config/environment');
 const { REALTIME_WS_PATH } = require('../config/constants');
 const { createExpressApp } = require('../http/createExpressApp');
 const { registerEphemeralTokenRoute } = require('../routes/registerEphemeralTokenRoute');
-const { createRealtimeWebSocketHandler } = require('../websocket/createRealtimeWebSocketHandler');
+const {
+  createRealtimeWebSocketHandler,
+} = require('../websocket/createRealtimeWebSocketHandler');
 const { createUpgradeHandler } = require('./createUpgradeHandler');
 
 function createRealtimeServer(options = {}) {

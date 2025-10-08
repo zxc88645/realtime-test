@@ -115,7 +115,9 @@
                   <p class="message-text">{{ item.text || '（等待回覆…）' }}</p>
                 </div>
               </div>
-              <p v-if="!webrtc.messages.length" class="messages-empty">尚未傳送任何訊息。</p>
+              <p v-if="!webrtc.messages.length" class="messages-empty">
+                尚未傳送任何訊息。
+              </p>
             </div>
           </div>
         </section>
@@ -132,7 +134,8 @@
               <code>response.create</code> 事件，讓 GPT 收到一致的提示。
             </li>
             <li>
-              頁面會記錄每次請求的時間點，直到 GPT 宣告回覆完成為止，並即時更新延遲儀表板。
+              頁面會記錄每次請求的時間點，直到 GPT
+              宣告回覆完成為止，並即時更新延遲儀表板。
             </li>
           </ol>
         </section>
