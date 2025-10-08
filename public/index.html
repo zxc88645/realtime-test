@@ -237,9 +237,19 @@
                 >
                   停止錄音並送出
                 </button>
+                <button
+                  type="button"
+                  class="secondary-button"
+                  @click="playRecordedAudio"
+                  :disabled="!ws.recordedAudioUrl"
+                  v-if="ws.recordedAudioUrl"
+                >
+                  播放錄音
+                </button>
               </div>
               <p class="helper-text">
                 錄音期間會持續串流至伺服器；按下停止後會自動將音訊送交 GPT 產生語音回覆。
+                {{ ws.recordedAudioUrl ? '可播放最近一次的錄音。' : '' }}
               </p>
             </div>
           </section>

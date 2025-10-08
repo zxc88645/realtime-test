@@ -122,6 +122,8 @@ function createTransportContext(id) {
     stopRecording: undefined,
     cancelRecording: undefined,
     configureSession: undefined,
+    recordedAudioBlob: null,
+    recordedAudioUrl: null,
   });
 }
 
@@ -489,8 +491,7 @@ function buildAudioResponseCreateEvent(clientMessageId, options = {}) {
     response: {
       metadata: {
         client_message_id: clientMessageId,
-      },
-      modalities: ['audio', 'text'],
+      },      
       input,
     },
   };
@@ -654,6 +655,11 @@ function stopWebSocketTransport(transport) {
   transport.stopRecording = undefined;
   transport.cancelRecording = undefined;
   transport.configureSession = undefined;
+  if (transport.recordedAudioUrl) {
+    URL.revokeObjectURL(transport.recordedAudioUrl);
+    transport.recordedAudioUrl = null;
+  }
+  transport.recordedAudioBlob = null;
   transport.status = '待命';
   if (!hadConnection) {
     transport.manualStop = false;
@@ -803,6 +809,7 @@ function startWebSocketTransport(transport, resolveLanguage) {
   let hasAudioData = false;
   let pendingStopResolver = null;
   let encodingFailed = false;
+  let recordedChunks = [];
 
   const ensureEncoder = async () => {
     if (!encoder) {
@@ -854,12 +861,23 @@ function startWebSocketTransport(transport, resolveLanguage) {
     encodingFailed = false;
     pendingStopResolver = null;
     encodingQueue = Promise.resolve();
+    recordedChunks = [];
   };
 
   const finalizeRecording = async () => {
     transport.isRecording = false;
     await encodingQueue.catch(() => {});
     encodingQueue = Promise.resolve();
+
+    // 保存錄音
+    if (recordedChunks.length > 0) {
+      const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+      transport.recordedAudioBlob = audioBlob;
+      if (transport.recordedAudioUrl) {
+        URL.revokeObjectURL(transport.recordedAudioUrl);
+      }
+      transport.recordedAudioUrl = URL.createObjectURL(audioBlob);
+    }
 
     if (!shouldSubmitRecording || !hasAudioData) {
       if (hasAudioData) {
@@ -967,6 +985,9 @@ function startWebSocketTransport(transport, resolveLanguage) {
       if (!event.data || !event.data.size) {
         return;
       }
+      // 保存錄音片段
+      recordedChunks.push(event.data);
+      
       encodingQueue = encodingQueue
         .then(async () => {
           const encoderInstance = await ensureEncoder();
@@ -1575,6 +1596,16 @@ const app = createApp({
       }
     };
 
+    const playRecordedAudio = () => {
+      if (!ws.recordedAudioUrl) {
+        return;
+      }
+      const audio = new Audio(ws.recordedAudioUrl);
+      audio.play().catch((error) => {
+        console.error('播放錄音失敗', error);
+      });
+    };
+
     watch(selectedMode, (next, previous) => {
       if (previous === next) {
         return;
@@ -1605,6 +1636,7 @@ const app = createApp({
       sendMessage,
       startVoiceRecording,
       stopVoiceRecording,
+      playRecordedAudio,
       roleLabel,
       messageContainerClass,
       messageBubbleClass,
