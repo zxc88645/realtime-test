@@ -1,4 +1,8 @@
 const request = require('supertest');
+const {
+  DEFAULT_REALTIME_MODEL,
+  DEFAULT_REALTIME_VOICE,
+} = require('../src/config/constants');
 const { createRealtimeServer, REALTIME_EPHEMERAL_PATH } = require('../server');
 
 describe('createRealtimeServer', () => {
@@ -40,6 +44,12 @@ describe('createRealtimeServer', () => {
       'https://api.openai.com/v1/realtime/sessions',
       expect.objectContaining({ method: 'POST' })
     );
+    const [, fetchOptions] = fakeFetch.mock.calls[0];
+    const requestBody = JSON.parse(fetchOptions.body);
+    expect(requestBody).toEqual({
+      model: DEFAULT_REALTIME_MODEL,
+      voice: DEFAULT_REALTIME_VOICE,
+    });
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       id: 'session-id',

@@ -1,7 +1,7 @@
 const { WebSocket } = require('ws');
 
 function createRealtimeWebSocketHandler(options) {
-  const { apiKey, realtimeModel, realtimeBaseUrl } = options;
+  const { apiKey, realtimeModel, realtimeVoice, realtimeBaseUrl } = options;
 
   return (clientSocket) => {
     console.log('WebSocket 用戶端已連線');
@@ -17,8 +17,13 @@ function createRealtimeWebSocketHandler(options) {
       return;
     }
 
-    const upstreamUrl = `${realtimeBaseUrl}?model=${encodeURIComponent(realtimeModel)}`;
-    const upstream = new WebSocket(upstreamUrl, {
+    const upstreamUrl = new URL(realtimeBaseUrl);
+    upstreamUrl.searchParams.set('model', realtimeModel);
+    if (realtimeVoice) {
+      upstreamUrl.searchParams.set('voice', realtimeVoice);
+    }
+
+    const upstream = new WebSocket(upstreamUrl.toString(), {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'OpenAI-Beta': 'realtime=v1',
