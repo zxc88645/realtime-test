@@ -10,6 +10,7 @@ const REALTIME_MODEL = 'gpt-4o-realtime-preview-2024-12-17';
 const REALTIME_BASE_URL = 'https://api.openai.com/v1/realtime';
 const REALTIME_WS_PATH = '/openai/agents/realtime/ws';
 const REALTIME_EPHEMERAL_PATH = '/openai/agents/realtime/ephemeral-token';
+const REALTIME_VOICE = 'verse';
 
 const ROLE_LABELS = {
   user: '你',
@@ -55,6 +56,7 @@ function createTransportContext(id) {
     localStream: null,
     remoteStream: null,
     audioElement: null,
+    audioPlayer: null,
   });
 }
 
@@ -186,6 +188,27 @@ function handleRealtimeEvent(transport, event) {
     return;
   }
 
+  if (
+    event.type === 'response.output_audio.delta' ||
+    event.type === 'response.audio.delta'
+  ) {
+    const audioChunk = extractAudioDelta(event);
+    if (audioChunk) {
+      try {
+        const player = ensureAudioPlayer(transport);
+        player.append(audioChunk).catch((error) => {
+          console.warn('播放即時音訊失敗', error);
+        });
+      } catch (error) {
+        console.warn('播放即時音訊失敗', error);
+      }
+    }
+  }
+
+  if (event.type === 'response.output_audio.done') {
+    return;
+  }
+
   const entry = ensureResponseEntry(transport, event);
   if (!entry) {
     return;
@@ -239,6 +262,11 @@ function buildResponseCreateEvent(text, clientMessageId) {
       metadata: {
         client_message_id: clientMessageId,
       },
+      modalities: ['text', 'audio'],
+      audio: {
+        voice: REALTIME_VOICE,
+        format: 'pcm16',
+      },
       input: [
         {
           role: 'user',
@@ -252,6 +280,182 @@ function buildResponseCreateEvent(text, clientMessageId) {
       ],
     },
   };
+}
+
+function createAudioPlayer({ sampleRate = 24000 } = {}) {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  let audioContext = null;
+  let nextStartTime = 0;
+
+  async function ensureAudioContext() {
+    if (!AudioContextClass) {
+      throw new Error('瀏覽器不支援即時音訊播放');
+    }
+    if (!audioContext) {
+      audioContext = new AudioContextClass({ sampleRate });
+    }
+    if (audioContext.state === 'suspended') {
+      try {
+        await audioContext.resume();
+      } catch (error) {
+        console.warn('恢復 AudioContext 失敗', error);
+      }
+    }
+    return audioContext;
+  }
+
+  function decodeBase64ToFloat32(base64) {
+    if (!base64) {
+      return null;
+    }
+    try {
+      const binary = atob(base64);
+      const view = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        view[index] = binary.charCodeAt(index);
+      }
+      const int16Array = new Int16Array(view.buffer);
+      const float32Array = new Float32Array(int16Array.length);
+      for (let i = 0; i < int16Array.length; i += 1) {
+        float32Array[i] = Math.max(-1, Math.min(1, int16Array[i] / 32768));
+      }
+      return float32Array;
+    } catch (error) {
+      console.warn('解碼音訊資料失敗', error);
+      return null;
+    }
+  }
+
+  async function append(base64) {
+    const samples = decodeBase64ToFloat32(base64);
+    if (!samples || !samples.length) {
+      return;
+    }
+
+    let context;
+    try {
+      context = await ensureAudioContext();
+    } catch (error) {
+      console.warn('初始化音訊播放失敗', error);
+      return;
+    }
+
+    const buffer = context.createBuffer(1, samples.length, sampleRate);
+    buffer.copyToChannel(samples, 0);
+
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+
+    const minimumStart = context.currentTime + 0.05;
+    const startTime = Math.max(nextStartTime, minimumStart);
+    try {
+      source.start(startTime);
+    } catch (error) {
+      console.warn('播放音訊片段失敗', error);
+      source.disconnect();
+      return;
+    }
+    nextStartTime = startTime + buffer.duration;
+    source.addEventListener('ended', () => {
+      try {
+        source.disconnect();
+      } catch (disconnectError) {
+        console.warn('釋放音訊資源失敗', disconnectError);
+      }
+    });
+  }
+
+  async function reset() {
+    nextStartTime = 0;
+    if (audioContext) {
+      try {
+        await audioContext.close();
+      } catch (error) {
+        console.warn('關閉 AudioContext 失敗', error);
+      }
+      audioContext = null;
+    }
+  }
+
+  return { append, reset };
+}
+
+function ensureAudioPlayer(transport) {
+  if (!transport.audioPlayer) {
+    transport.audioPlayer = createAudioPlayer();
+  }
+  return transport.audioPlayer;
+}
+
+function extractAudioDelta(event) {
+  if (!event || typeof event !== 'object') {
+    return null;
+  }
+  const candidates = [];
+  if (event.delta) {
+    if (typeof event.delta === 'string') {
+      candidates.push(event.delta);
+    } else if (typeof event.delta.audio === 'string') {
+      candidates.push(event.delta.audio);
+    } else if (typeof event.delta.data === 'string') {
+      candidates.push(event.delta.data);
+    } else if (Array.isArray(event.delta)) {
+      for (const deltaItem of event.delta) {
+        if (typeof deltaItem === 'string') {
+          candidates.push(deltaItem);
+        } else if (typeof deltaItem?.audio === 'string') {
+          candidates.push(deltaItem.audio);
+        } else if (typeof deltaItem?.data === 'string') {
+          candidates.push(deltaItem.data);
+        }
+      }
+    }
+  }
+  if (event.audio) {
+    if (typeof event.audio === 'string') {
+      candidates.push(event.audio);
+    } else if (typeof event.audio.data === 'string') {
+      candidates.push(event.audio.data);
+    }
+  }
+  const itemContent = event?.item?.content;
+  if (Array.isArray(itemContent)) {
+    for (const item of itemContent) {
+      if (typeof item === 'string') {
+        continue;
+      }
+      if (item?.type === 'output_audio') {
+        if (typeof item?.audio === 'string') {
+          candidates.push(item.audio);
+        } else if (typeof item?.audio?.data === 'string') {
+          candidates.push(item.audio.data);
+        } else if (typeof item?.data === 'string') {
+          candidates.push(item.data);
+        }
+      }
+      if (item?.delta) {
+        if (typeof item.delta === 'string') {
+          candidates.push(item.delta);
+        } else if (typeof item.delta?.audio === 'string') {
+          candidates.push(item.delta.audio);
+        } else if (typeof item.delta?.data === 'string') {
+          candidates.push(item.delta.data);
+        } else if (Array.isArray(item.delta)) {
+          for (const nestedDelta of item.delta) {
+            if (typeof nestedDelta === 'string') {
+              candidates.push(nestedDelta);
+            } else if (typeof nestedDelta?.audio === 'string') {
+              candidates.push(nestedDelta.audio);
+            } else if (typeof nestedDelta?.data === 'string') {
+              candidates.push(nestedDelta.data);
+            }
+          }
+        }
+      }
+    }
+  }
+  return candidates.find((value) => typeof value === 'string' && value.length);
 }
 
 function stopWebSocketTransport(transport) {
@@ -272,6 +476,11 @@ function stopWebSocketTransport(transport) {
   transport.isReady = false;
   transport.pendingMessages.clear();
   transport.responsesById.clear();
+  if (transport.audioPlayer) {
+    transport.audioPlayer.reset().catch((error) => {
+      console.warn('重設即時音訊播放器失敗', error);
+    });
+  }
   transport.status = '待命';
   if (!hadConnection) {
     transport.manualStop = false;
@@ -365,6 +574,11 @@ function startWebSocketTransport(transport) {
   transport.isReady = false;
   transport.pendingMessages.clear();
   transport.responsesById.clear();
+  if (transport.audioPlayer) {
+    transport.audioPlayer.reset().catch((error) => {
+      console.warn('重設即時音訊播放器失敗', error);
+    });
+  }
   resetLatencies(transport);
   transport.status = '連線中…';
 
@@ -397,6 +611,11 @@ function startWebSocketTransport(transport) {
     transport.send = undefined;
     transport.pendingMessages.clear();
     transport.responsesById.clear();
+    if (transport.audioPlayer) {
+      transport.audioPlayer.reset().catch((error) => {
+        console.warn('重設即時音訊播放器失敗', error);
+      });
+    }
     transport.status = transport.manualStop ? '待命' : '已關閉';
     transport.manualStop = false;
   });
