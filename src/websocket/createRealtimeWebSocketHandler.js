@@ -1,5 +1,3 @@
-const { OpenAIRealtimeWebSocket } = require('@openai/agents-realtime');
-
 function resolveReadyState(socket, stateName, fallback) {
   if (!socket || typeof socket[stateName] !== 'number') {
     return fallback;
@@ -70,6 +68,17 @@ function resolveRealtimeWebSocketUrl(realtimeBaseUrl, realtimeModel, realtimeVoi
   }
 }
 
+let CachedRealtimeTransportClass;
+
+function resolveDefaultRealtimeTransport() {
+  if (!CachedRealtimeTransportClass) {
+    ({
+      OpenAIRealtimeWebSocket: CachedRealtimeTransportClass,
+    } = require('@openai/agents-realtime'));
+  }
+  return new CachedRealtimeTransportClass();
+}
+
 function createRealtimeWebSocketHandler(options) {
   const {
     apiKey,
@@ -88,7 +97,7 @@ function createRealtimeWebSocketHandler(options) {
   const createTransport =
     typeof createRealtimeTransport === 'function'
       ? createRealtimeTransport
-      : () => new OpenAIRealtimeWebSocket();
+      : () => resolveDefaultRealtimeTransport();
 
   return (clientSocket) => {
     console.log('WebSocket 用戶端已連線');
@@ -217,6 +226,24 @@ function createRealtimeWebSocketHandler(options) {
       }
     };
 
+    const sendSessionUpdate = () => {
+      if (typeof upstreamTransport?.sendEvent !== 'function') {
+        return;
+      }
+
+      try {
+        upstreamTransport.sendEvent({
+          type: 'session.update',
+          session: {
+            voice: realtimeVoice,
+            instructions: '此連線由伺服器代理建立，請啟用語音回應。',
+          },
+        });
+      } catch (error) {
+        console.warn('傳送 session.update 事件時發生錯誤', error);
+      }
+    };
+
     const connectPromise = upstreamTransport
       .connect({
         apiKey,
@@ -246,7 +273,7 @@ function createRealtimeWebSocketHandler(options) {
         addUpstreamListener(upstreamSocket, 'close', handleUpstreamClose);
         addUpstreamListener(upstreamSocket, 'error', handleUpstreamError);
 
-
+        sendSessionUpdate();
 
         if (isSocketOpen(clientSocket)) {
           try {

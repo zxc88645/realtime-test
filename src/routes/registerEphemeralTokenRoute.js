@@ -1,7 +1,27 @@
 const { REALTIME_EPHEMERAL_PATH } = require('../config/constants');
+const {
+  createRealtimeSessionService,
+  RealtimeSessionError,
+} = require('../services/createRealtimeSessionService');
+
+function ensureSessionService(sessionService) {
+  if (!sessionService || typeof sessionService.createSession !== 'function') {
+    throw new Error('必須提供具備 createSession 方法的 sessionService');
+  }
+  return sessionService;
+}
 
 function registerEphemeralTokenRoute(app, dependencies) {
-  const { apiKey, realtimeModel, realtimeVoice, createOpenAIClient } = dependencies;
+  const { apiKey } = dependencies;
+
+  const sessionService = ensureSessionService(
+    dependencies.sessionService ||
+      createRealtimeSessionService({
+        createOpenAIClient: dependencies.createOpenAIClient,
+        realtimeModel: dependencies.realtimeModel,
+        realtimeVoice: dependencies.realtimeVoice,
+      })
+  );
 
   app.post(REALTIME_EPHEMERAL_PATH, async (_req, res) => {
     if (!apiKey) {
@@ -9,33 +29,16 @@ function registerEphemeralTokenRoute(app, dependencies) {
       return;
     }
 
-    let client;
     try {
-      client = await Promise.resolve(createOpenAIClient());
+      const session = await sessionService.createSession();
+      res.json(session);
     } catch (error) {
-      console.error('建立 OpenAI 客戶端失敗', error);
-      res.status(500).json({ error: '建立短效會話時發生錯誤' });
-      return;
-    }
-
-    try {
-      const session = await client.createSession({
-        model: realtimeModel,
-        voice: realtimeVoice,
-      });
-      res.json({
-        id: session.id,
-        client_secret: session.client_secret,
-        expires_at: session.client_secret?.expires_at ?? null,
-      });
-    } catch (error) {
-      if (typeof error?.status === 'number') {
-        const details =
-          error?.error?.message ??
-          (typeof error?.message === 'string' ? error.message : undefined) ??
-          '建立短效會話失敗';
+      if (error instanceof RealtimeSessionError && typeof error.status === 'number') {
         console.error('建立短效會話失敗', error);
-        res.status(error.status).json({ error: '建立短效會話失敗', details });
+        res.status(error.status).json({
+          error: '建立短效會話失敗',
+          details: error.details ?? '建立短效會話失敗',
+        });
         return;
       }
 
