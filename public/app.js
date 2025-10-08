@@ -1,35 +1,9 @@
+import { createApp, computed, reactive, ref } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
+
 const REALTIME_MODEL = 'gpt-4o-realtime-preview-2024-12-17';
 const REALTIME_BASE_URL = 'https://api.openai.com/v1/realtime';
 const REALTIME_WS_PATH = '/openai/agents/realtime/ws';
 const REALTIME_EPHEMERAL_PATH = '/openai/agents/realtime/ephemeral-token';
-
-function createLatencyTracker(root) {
-  const statusEl = root.querySelector('.status');
-  const latestEl = root.querySelector('.latest');
-  const averageEl = root.querySelector('.average');
-  const samplesEl = root.querySelector('.samples');
-
-  const latencies = [];
-
-  return {
-    setStatus(status) {
-      statusEl.textContent = status;
-    },
-    recordLatency(duration) {
-      latencies.push(duration);
-      const average = latencies.reduce((sum, value) => sum + value, 0) / latencies.length;
-      latestEl.textContent = `${duration.toFixed(2)} 毫秒`;
-      averageEl.textContent = `${average.toFixed(2)} 毫秒`;
-      samplesEl.textContent = String(latencies.length);
-    },
-    reset() {
-      latencies.length = 0;
-      latestEl.textContent = '–';
-      averageEl.textContent = '–';
-      samplesEl.textContent = '0';
-    },
-  };
-}
 
 const ROLE_LABELS = {
   user: '你',
@@ -38,23 +12,52 @@ const ROLE_LABELS = {
   error: '錯誤',
 };
 
-function appendMessage(container, role, text = '') {
-  const wrapper = document.createElement('div');
-  wrapper.className = `message ${role}`;
+function createTransportContext(id) {
+  return reactive({
+    id,
+    status: '待命',
+    latest: '–',
+    average: '–',
+    samples: 0,
+    messages: [],
+    isReady: false,
+    connection: null,
+    dataChannel: null,
+    send: undefined,
+    latencies: [],
+    pendingMessages: new Map(),
+    responsesById: new Map(),
+  });
+}
 
-  const roleEl = document.createElement('span');
-  roleEl.className = 'message-role';
-  roleEl.textContent = ROLE_LABELS[role] ?? role;
+function roleLabel(role) {
+  return ROLE_LABELS[role] ?? role;
+}
 
-  const textEl = document.createElement('span');
-  textEl.className = 'message-text';
-  textEl.textContent = text;
+function resetLatencies(transport) {
+  transport.latencies.length = 0;
+  transport.latest = '–';
+  transport.average = '–';
+  transport.samples = 0;
+}
 
-  wrapper.append(roleEl, textEl);
-  container.appendChild(wrapper);
-  container.scrollTop = container.scrollHeight;
+function recordLatency(transport, duration) {
+  transport.latencies.push(duration);
+  const average =
+    transport.latencies.reduce((sum, value) => sum + value, 0) / transport.latencies.length;
+  transport.latest = `${duration.toFixed(2)} 毫秒`;
+  transport.average = `${average.toFixed(2)} 毫秒`;
+  transport.samples = transport.latencies.length;
+}
 
-  return { wrapper, textEl };
+function appendMessage(transport, role, text = '') {
+  const message = {
+    id: crypto.randomUUID(),
+    role,
+    text,
+  };
+  transport.messages.push(message);
+  return message;
 }
 
 function textFromContent(content) {
@@ -114,62 +117,47 @@ function extractCompletedText(event, fallback = '') {
   return fallback;
 }
 
-function createTransportState({ id, tracker, messagesEl }) {
-  return {
-    id,
-    tracker,
-    messagesEl,
-    isReady: false,
-    connection: null,
-    pendingMessages: new Map(),
-    responsesById: new Map(),
-  };
-}
-
-function ensureResponseEntry(state, event) {
+function ensureResponseEntry(transport, event) {
   const response = event?.response;
   if (!response?.id) {
     return null;
   }
-  let entry = state.responsesById.get(response.id);
+  let entry = transport.responsesById.get(response.id);
   if (!entry) {
     const clientMessageId = response.metadata?.client_message_id;
-    const { textEl } = appendMessage(
-      state.messagesEl,
-      state.id === 'ws' ? 'gpt-ws' : 'gpt-webrtc'
-    );
+    const messageRole = transport.id === 'ws' ? 'gpt-ws' : 'gpt-webrtc';
+    const message = appendMessage(transport, messageRole);
     entry = {
       clientMessageId,
-      text: '',
-      textEl,
+      message,
     };
-    state.responsesById.set(response.id, entry);
+    transport.responsesById.set(response.id, entry);
   } else if (!entry.clientMessageId && response.metadata?.client_message_id) {
     entry.clientMessageId = response.metadata.client_message_id;
   }
   return entry;
 }
 
-function handleRealtimeEvent(state, event) {
+function handleRealtimeEvent(transport, event) {
   if (!event || typeof event !== 'object') {
     return;
   }
 
   if (event.type === 'error') {
     const message = event.error?.message || event.message || '發生未知的即時錯誤';
-    appendMessage(state.messagesEl, 'error', message);
-    state.tracker.setStatus('錯誤');
+    appendMessage(transport, 'error', message);
+    transport.status = '錯誤';
     return;
   }
 
   if (event.type === 'server.status') {
     if (typeof event.status === 'string') {
-      state.tracker.setStatus(event.status);
+      transport.status = event.status;
     }
     return;
   }
 
-  const entry = ensureResponseEntry(state, event);
+  const entry = ensureResponseEntry(transport, event);
   if (!entry) {
     return;
   }
@@ -177,27 +165,42 @@ function handleRealtimeEvent(state, event) {
   if (event.type === 'response.delta' || event.type === 'response.output_text.delta') {
     const fragment = extractDeltaText(event);
     if (fragment) {
-      entry.text += fragment;
-      entry.textEl.textContent = entry.text;
+      entry.message.text += fragment;
     }
   } else if (event.type === 'response.completed') {
-    const finalText = extractCompletedText(event, entry.text);
-    entry.text = finalText;
-    entry.textEl.textContent = finalText;
-    if (entry.clientMessageId && state.pendingMessages.has(entry.clientMessageId)) {
-      const started = state.pendingMessages.get(entry.clientMessageId).start;
-      state.tracker.recordLatency(performance.now() - started);
-      state.pendingMessages.delete(entry.clientMessageId);
+    const finalText = extractCompletedText(event, entry.message.text);
+    entry.message.text = finalText;
+    if (entry.clientMessageId && transport.pendingMessages.has(entry.clientMessageId)) {
+      const started = transport.pendingMessages.get(entry.clientMessageId).start;
+      recordLatency(transport, performance.now() - started);
+      transport.pendingMessages.delete(entry.clientMessageId);
     }
-    state.responsesById.delete(event.response.id);
+    transport.responsesById.delete(event.response.id);
   } else if (event.type === 'response.error') {
     const message = event.error?.message || '模型無法產生回應。';
-    appendMessage(state.messagesEl, 'error', message);
-    if (entry.clientMessageId && state.pendingMessages.has(entry.clientMessageId)) {
-      state.pendingMessages.delete(entry.clientMessageId);
+    appendMessage(transport, 'error', message);
+    if (entry.clientMessageId && transport.pendingMessages.has(entry.clientMessageId)) {
+      transport.pendingMessages.delete(entry.clientMessageId);
     }
-    state.responsesById.delete(event.response.id);
+    transport.responsesById.delete(event.response.id);
   }
+}
+
+async function parseEventData(data) {
+  if (typeof data === 'string') {
+    return JSON.parse(data);
+  }
+  if (data instanceof Blob) {
+    return JSON.parse(await data.text());
+  }
+  const decoder = new TextDecoder();
+  if (data instanceof ArrayBuffer) {
+    return JSON.parse(decoder.decode(data));
+  }
+  if (ArrayBuffer.isView(data)) {
+    return JSON.parse(decoder.decode(data));
+  }
+  throw new Error('不支援的事件資料型別');
 }
 
 function buildResponseCreateEvent(text, clientMessageId) {
@@ -222,86 +225,31 @@ function buildResponseCreateEvent(text, clientMessageId) {
   };
 }
 
-const startButton = document.querySelector('#start');
-const messageForm = document.querySelector('#message-form');
-const messageInput = document.querySelector('#message');
-const sendButton = document.querySelector('#send');
-
-const wsTracker = createLatencyTracker(document.querySelector('#ws-result'));
-const webrtcTracker = createLatencyTracker(document.querySelector('#webrtc-result'));
-
-const wsMessagesEl = document.querySelector('#ws-result .messages');
-const webrtcMessagesEl = document.querySelector('#webrtc-result .messages');
-
-const wsState = createTransportState({
-  id: 'ws',
-  tracker: wsTracker,
-  messagesEl: wsMessagesEl,
-});
-const webrtcState = createTransportState({
-  id: 'webrtc',
-  tracker: webrtcTracker,
-  messagesEl: webrtcMessagesEl,
-});
-
-let hasAttemptedConnection = false;
-
-function updateSendControls() {
-  const ready = wsState.isReady || webrtcState.isReady;
-  messageInput.disabled = !ready;
-  sendButton.disabled = !ready;
-}
-
-function updateStartButton() {
-  const connecting =
-    (wsState.connection && !wsState.isReady) ||
-    (webrtcState.connection && !webrtcState.isReady);
-
-  if (wsState.isReady || webrtcState.isReady) {
-    startButton.textContent = '已連線';
-    startButton.disabled = true;
-  } else if (connecting) {
-    startButton.textContent = '連線中…';
-    startButton.disabled = true;
-  } else {
-    startButton.textContent = hasAttemptedConnection ? '重新連線' : '連線';
-    startButton.disabled = false;
+function startWebSocketTransport(transport) {
+  if (transport.connection) {
+    try {
+      transport.connection.close();
+    } catch (error) {
+      console.warn('關閉既有 WebSocket 連線時發生錯誤', error);
+    }
   }
-}
-
-async function parseEventData(data) {
-  if (typeof data === 'string') {
-    return JSON.parse(data);
-  }
-  if (data instanceof Blob) {
-    return JSON.parse(await data.text());
-  }
-  const decoder = new TextDecoder();
-  if (data instanceof ArrayBuffer) {
-    return JSON.parse(decoder.decode(data));
-  }
-  if (ArrayBuffer.isView(data)) {
-    return JSON.parse(decoder.decode(data));
-  }
-  throw new Error('不支援的事件資料型別');
-}
-
-function startWebSocketTransport() {
-  wsTracker.reset();
-  wsTracker.setStatus('連線中…');
+  transport.connection = null;
+  transport.send = undefined;
+  transport.isReady = false;
+  transport.pendingMessages.clear();
+  transport.responsesById.clear();
+  resetLatencies(transport);
+  transport.status = '連線中…';
 
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(`${protocol}//${location.host}${REALTIME_WS_PATH}`);
-  wsState.connection = socket;
-  updateStartButton();
+  transport.connection = socket;
 
   const queue = [];
 
   socket.addEventListener('open', () => {
-    wsState.isReady = true;
-    wsTracker.setStatus('已連線');
-    updateSendControls();
-    updateStartButton();
+    transport.isReady = true;
+    transport.status = '已連線';
     while (queue.length && socket.readyState === WebSocket.OPEN) {
       socket.send(queue.shift());
     }
@@ -310,31 +258,27 @@ function startWebSocketTransport() {
   socket.addEventListener('message', async (event) => {
     try {
       const payload = await parseEventData(event.data);
-      handleRealtimeEvent(wsState, payload);
+      handleRealtimeEvent(transport, payload);
     } catch (error) {
       console.error('解析 WebSocket 負載時發生錯誤', error);
     }
   });
 
   socket.addEventListener('close', () => {
-    wsState.isReady = false;
-    wsState.connection = null;
-    wsState.send = undefined;
-    wsState.pendingMessages.clear();
-    updateSendControls();
-    if (wsTracker) {
-      wsTracker.setStatus('已關閉');
-    }
-    updateStartButton();
+    transport.isReady = false;
+    transport.connection = null;
+    transport.send = undefined;
+    transport.pendingMessages.clear();
+    transport.responsesById.clear();
+    transport.status = '已關閉';
   });
 
   socket.addEventListener('error', (error) => {
     console.error('WebSocket 傳輸發生錯誤', error);
-    wsTracker.setStatus('錯誤（詳見主控台）');
-    updateStartButton();
+    transport.status = '錯誤（詳見主控台）';
   });
 
-  wsState.send = (text) => {
+  transport.send = (text) => {
     if (!socket || socket.readyState === WebSocket.CLOSED) {
       return false;
     }
@@ -351,17 +295,30 @@ function startWebSocketTransport() {
     } else {
       return false;
     }
-    wsState.pendingMessages.set(clientMessageId, {
+    transport.pendingMessages.set(clientMessageId, {
       start: performance.now(),
     });
-    appendMessage(wsState.messagesEl, 'user', message);
+    appendMessage(transport, 'user', message);
     return true;
   };
 }
 
-async function startWebRTCTransport() {
-  webrtcTracker.reset();
-  webrtcTracker.setStatus('取得金鑰中…');
+async function startWebRTCTransport(transport) {
+  if (transport.connection) {
+    try {
+      transport.connection.close();
+    } catch (error) {
+      console.warn('關閉既有 WebRTC 連線時發生錯誤', error);
+    }
+  }
+  transport.connection = null;
+  transport.dataChannel = null;
+  transport.send = undefined;
+  transport.isReady = false;
+  transport.pendingMessages.clear();
+  transport.responsesById.clear();
+  resetLatencies(transport);
+  transport.status = '取得金鑰中…';
 
   let token;
   try {
@@ -379,55 +336,49 @@ async function startWebRTCTransport() {
     }
   } catch (error) {
     console.error('取得短效金鑰失敗', error);
-    appendMessage(webrtcState.messagesEl, 'error', error.message || '取得短效金鑰失敗');
-    webrtcTracker.setStatus('錯誤（金鑰）');
-    updateStartButton();
+    appendMessage(transport, 'error', error.message || '取得短效金鑰失敗');
+    transport.status = '錯誤（金鑰）';
     return;
   }
 
   const peerConnection = new RTCPeerConnection();
-  webrtcState.connection = peerConnection;
-  updateStartButton();
+  transport.connection = peerConnection;
 
   const dataChannel = peerConnection.createDataChannel('oai-events');
-  webrtcState.dataChannel = dataChannel;
+  transport.dataChannel = dataChannel;
 
   dataChannel.addEventListener('open', () => {
-    webrtcState.isReady = true;
-    webrtcTracker.setStatus('已連線');
-    updateSendControls();
-    updateStartButton();
+    transport.isReady = true;
+    transport.status = '已連線';
   });
 
   dataChannel.addEventListener('message', async (event) => {
     try {
       const payload = await parseEventData(event.data);
-      handleRealtimeEvent(webrtcState, payload);
+      handleRealtimeEvent(transport, payload);
     } catch (error) {
       console.error('解析資料通道負載時發生錯誤', error);
     }
   });
 
   dataChannel.addEventListener('close', () => {
-    webrtcState.isReady = false;
-    webrtcState.dataChannel = null;
-    webrtcState.connection = null;
-    webrtcState.send = undefined;
-    webrtcState.pendingMessages.clear();
+    transport.isReady = false;
+    transport.dataChannel = null;
+    transport.connection = null;
+    transport.send = undefined;
+    transport.pendingMessages.clear();
+    transport.responsesById.clear();
+    transport.status = '已關閉';
     try {
       peerConnection.close();
     } catch (error) {
       console.warn('關閉對等連線時發生錯誤', error);
     }
-    updateSendControls();
-    webrtcTracker.setStatus('已關閉');
-    updateStartButton();
   });
 
   dataChannel.addEventListener('error', (error) => {
     console.error('資料通道發生錯誤', error);
-    webrtcTracker.setStatus('錯誤（詳見主控台）');
-    updateStartButton();
+    transport.status = '錯誤（詳見主控台）';
   });
 
   try {
@@ -457,7 +408,7 @@ async function startWebRTCTransport() {
       throw new Error('缺少本地 SDP offer');
     }
 
-    webrtcTracker.setStatus('協商中…');
+    transport.status = '協商中…';
 
     const answerResponse = await fetch(
       `${REALTIME_BASE_URL}?model=${encodeURIComponent(REALTIME_MODEL)}`,
@@ -478,23 +429,26 @@ async function startWebRTCTransport() {
 
     const answerSdp = await answerResponse.text();
     await peerConnection.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-    webrtcTracker.setStatus('等待資料通道…');
+    transport.status = '等待資料通道…';
   } catch (error) {
     console.error('WebRTC 協商失敗', error);
-    appendMessage(webrtcState.messagesEl, 'error', error.message || 'WebRTC 協商失敗');
-    webrtcTracker.setStatus('錯誤（詳見主控台）');
-    peerConnection.close();
-    webrtcState.connection = null;
-    webrtcState.dataChannel = null;
-    webrtcState.send = undefined;
-    webrtcState.pendingMessages.clear();
-    updateSendControls();
-    updateStartButton();
+    appendMessage(transport, 'error', error.message || 'WebRTC 協商失敗');
+    transport.status = '錯誤（詳見主控台）';
+    try {
+      peerConnection.close();
+    } catch (closeError) {
+      console.warn('關閉失敗的對等連線時發生錯誤', closeError);
+    }
+    transport.connection = null;
+    transport.dataChannel = null;
+    transport.send = undefined;
+    transport.pendingMessages.clear();
+    transport.responsesById.clear();
     return;
   }
 
-  webrtcState.send = (text) => {
-    const channel = webrtcState.dataChannel;
+  transport.send = (text) => {
+    const channel = transport.dataChannel;
     if (!channel || channel.readyState !== 'open') {
       return false;
     }
@@ -504,43 +458,82 @@ async function startWebRTCTransport() {
     }
     const clientMessageId = crypto.randomUUID();
     channel.send(JSON.stringify(buildResponseCreateEvent(message, clientMessageId)));
-    webrtcState.pendingMessages.set(clientMessageId, {
+    transport.pendingMessages.set(clientMessageId, {
       start: performance.now(),
     });
-    appendMessage(webrtcState.messagesEl, 'user', message);
+    appendMessage(transport, 'user', message);
     return true;
   };
 }
 
-startButton.addEventListener('click', () => {
-  startButton.disabled = true;
-  hasAttemptedConnection = true;
-  startButton.textContent = '連線中…';
-  startWebSocketTransport();
-  startWebRTCTransport();
-  updateStartButton();
+const app = createApp({
+  setup() {
+    const message = ref('');
+    const messageInputRef = ref(null);
+    const hasAttemptedConnection = ref(false);
+
+    const ws = createTransportContext('ws');
+    const webrtc = createTransportContext('webrtc');
+
+    const isConnecting = computed(
+      () => (!!ws.connection && !ws.isReady) || (!!webrtc.connection && !webrtc.isReady)
+    );
+
+    const startLabel = computed(() => {
+      if (ws.isReady || webrtc.isReady) {
+        return '已連線';
+      }
+      if (isConnecting.value) {
+        return '連線中…';
+      }
+      return hasAttemptedConnection.value ? '重新連線' : '連線';
+    });
+
+    const startDisabled = computed(() => ws.isReady || webrtc.isReady || isConnecting.value);
+
+    const canSend = computed(() => ws.isReady || webrtc.isReady);
+
+    const onStartClick = () => {
+      hasAttemptedConnection.value = true;
+      startWebSocketTransport(ws);
+      startWebRTCTransport(webrtc);
+    };
+
+    const sendMessage = () => {
+      const text = message.value.trim();
+      if (!text) {
+        return;
+      }
+
+      const sentViaWS = ws.send ? ws.send(text) : false;
+      const sentViaWebRTC = webrtc.send ? webrtc.send(text) : false;
+
+      if (!sentViaWS && !sentViaWebRTC) {
+        const errorText = '無法傳送訊息，請確認至少有一種傳輸方式已連線。';
+        appendMessage(ws, 'error', errorText);
+        appendMessage(webrtc, 'error', errorText);
+        return;
+      }
+
+      message.value = '';
+      if (messageInputRef.value) {
+        messageInputRef.value.focus();
+      }
+    };
+
+    return {
+      message,
+      messageInputRef,
+      ws,
+      webrtc,
+      startLabel,
+      startDisabled,
+      canSend,
+      onStartClick,
+      sendMessage,
+      roleLabel,
+    };
+  },
 });
 
-messageForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  const text = messageInput.value.trim();
-  if (!text) {
-    return;
-  }
-
-  const sentViaWS = wsState.send ? wsState.send(text) : false;
-  const sentViaWebRTC = webrtcState.send ? webrtcState.send(text) : false;
-
-  if (!sentViaWS && !sentViaWebRTC) {
-    const errorText = '無法傳送訊息，請確認至少有一種傳輸方式已連線。';
-    appendMessage(wsState.messagesEl, 'error', errorText);
-    appendMessage(webrtcState.messagesEl, 'error', errorText);
-    return;
-  }
-
-  messageInput.value = '';
-  messageInput.focus();
-});
-
-updateSendControls();
-updateStartButton();
+app.mount('#app');
