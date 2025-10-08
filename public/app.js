@@ -17,10 +17,9 @@ function createLatencyTracker(root) {
     },
     recordLatency(duration) {
       latencies.push(duration);
-      const average =
-        latencies.reduce((sum, value) => sum + value, 0) / latencies.length;
-      latestEl.textContent = `${duration.toFixed(2)} ms`;
-      averageEl.textContent = `${average.toFixed(2)} ms`;
+      const average = latencies.reduce((sum, value) => sum + value, 0) / latencies.length;
+      latestEl.textContent = `${duration.toFixed(2)} 毫秒`;
+      averageEl.textContent = `${average.toFixed(2)} 毫秒`;
       samplesEl.textContent = String(latencies.length);
     },
     reset() {
@@ -33,10 +32,10 @@ function createLatencyTracker(root) {
 }
 
 const ROLE_LABELS = {
-  user: 'You',
-  'gpt-ws': 'GPT (WebSocket)',
-  'gpt-webrtc': 'GPT (WebRTC)',
-  error: 'Error',
+  user: '你',
+  'gpt-ws': 'GPT（WebSocket）',
+  'gpt-webrtc': 'GPT（WebRTC）',
+  error: '錯誤',
 };
 
 function appendMessage(container, role, text = '') {
@@ -157,10 +156,9 @@ function handleRealtimeEvent(state, event) {
   }
 
   if (event.type === 'error') {
-    const message =
-      event.error?.message || event.message || 'Unknown realtime error';
+    const message = event.error?.message || event.message || '發生未知的即時錯誤';
     appendMessage(state.messagesEl, 'error', message);
-    state.tracker.setStatus('Error');
+    state.tracker.setStatus('錯誤');
     return;
   }
 
@@ -193,8 +191,7 @@ function handleRealtimeEvent(state, event) {
     }
     state.responsesById.delete(event.response.id);
   } else if (event.type === 'response.error') {
-    const message =
-      event.error?.message || 'The model failed to generate a response.';
+    const message = event.error?.message || '模型無法產生回應。';
     appendMessage(state.messagesEl, 'error', message);
     if (entry.clientMessageId && state.pendingMessages.has(entry.clientMessageId)) {
       state.pendingMessages.delete(entry.clientMessageId);
@@ -231,9 +228,7 @@ const messageInput = document.querySelector('#message');
 const sendButton = document.querySelector('#send');
 
 const wsTracker = createLatencyTracker(document.querySelector('#ws-result'));
-const webrtcTracker = createLatencyTracker(
-  document.querySelector('#webrtc-result')
-);
+const webrtcTracker = createLatencyTracker(document.querySelector('#webrtc-result'));
 
 const wsMessagesEl = document.querySelector('#ws-result .messages');
 const webrtcMessagesEl = document.querySelector('#webrtc-result .messages');
@@ -263,13 +258,13 @@ function updateStartButton() {
     (webrtcState.connection && !webrtcState.isReady);
 
   if (wsState.isReady || webrtcState.isReady) {
-    startButton.textContent = 'Connected';
+    startButton.textContent = '已連線';
     startButton.disabled = true;
   } else if (connecting) {
-    startButton.textContent = 'Connecting…';
+    startButton.textContent = '連線中…';
     startButton.disabled = true;
   } else {
-    startButton.textContent = hasAttemptedConnection ? 'Reconnect' : 'Connect';
+    startButton.textContent = hasAttemptedConnection ? '重新連線' : '連線';
     startButton.disabled = false;
   }
 }
@@ -288,12 +283,12 @@ async function parseEventData(data) {
   if (ArrayBuffer.isView(data)) {
     return JSON.parse(decoder.decode(data));
   }
-  throw new Error('Unsupported event data type');
+  throw new Error('不支援的事件資料型別');
 }
 
 function startWebSocketTransport() {
   wsTracker.reset();
-  wsTracker.setStatus('Connecting…');
+  wsTracker.setStatus('連線中…');
 
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(`${protocol}//${location.host}${REALTIME_WS_PATH}`);
@@ -304,7 +299,7 @@ function startWebSocketTransport() {
 
   socket.addEventListener('open', () => {
     wsState.isReady = true;
-    wsTracker.setStatus('Connected');
+    wsTracker.setStatus('已連線');
     updateSendControls();
     updateStartButton();
     while (queue.length && socket.readyState === WebSocket.OPEN) {
@@ -317,7 +312,7 @@ function startWebSocketTransport() {
       const payload = await parseEventData(event.data);
       handleRealtimeEvent(wsState, payload);
     } catch (error) {
-      console.error('Failed to parse WebSocket payload', error);
+      console.error('解析 WebSocket 負載時發生錯誤', error);
     }
   });
 
@@ -328,14 +323,14 @@ function startWebSocketTransport() {
     wsState.pendingMessages.clear();
     updateSendControls();
     if (wsTracker) {
-      wsTracker.setStatus('Closed');
+      wsTracker.setStatus('已關閉');
     }
     updateStartButton();
   });
 
   socket.addEventListener('error', (error) => {
-    console.error('WebSocket transport error', error);
-    wsTracker.setStatus('Error (see console)');
+    console.error('WebSocket 傳輸發生錯誤', error);
+    wsTracker.setStatus('錯誤（詳見主控台）');
     updateStartButton();
   });
 
@@ -366,7 +361,7 @@ function startWebSocketTransport() {
 
 async function startWebRTCTransport() {
   webrtcTracker.reset();
-  webrtcTracker.setStatus('Fetching token…');
+  webrtcTracker.setStatus('取得金鑰中…');
 
   let token;
   try {
@@ -375,23 +370,17 @@ async function startWebRTCTransport() {
     });
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(
-        `Failed to obtain ephemeral key (${response.status}): ${errorText}`
-      );
+      throw new Error(`取得短效金鑰失敗（${response.status}）：${errorText}`);
     }
     const data = await response.json();
     token = data?.client_secret?.value || data?.client_secret;
     if (!token) {
-      throw new Error('Ephemeral key response did not include a client secret');
+      throw new Error('短效金鑰回應缺少 client secret');
     }
   } catch (error) {
-    console.error('Failed to fetch ephemeral key', error);
-    appendMessage(
-      webrtcState.messagesEl,
-      'error',
-      error.message || 'Failed to fetch ephemeral key'
-    );
-    webrtcTracker.setStatus('Error (token)');
+    console.error('取得短效金鑰失敗', error);
+    appendMessage(webrtcState.messagesEl, 'error', error.message || '取得短效金鑰失敗');
+    webrtcTracker.setStatus('錯誤（金鑰）');
     updateStartButton();
     return;
   }
@@ -405,7 +394,7 @@ async function startWebRTCTransport() {
 
   dataChannel.addEventListener('open', () => {
     webrtcState.isReady = true;
-    webrtcTracker.setStatus('Connected');
+    webrtcTracker.setStatus('已連線');
     updateSendControls();
     updateStartButton();
   });
@@ -415,7 +404,7 @@ async function startWebRTCTransport() {
       const payload = await parseEventData(event.data);
       handleRealtimeEvent(webrtcState, payload);
     } catch (error) {
-      console.error('Failed to parse data channel payload', error);
+      console.error('解析資料通道負載時發生錯誤', error);
     }
   });
 
@@ -428,16 +417,16 @@ async function startWebRTCTransport() {
     try {
       peerConnection.close();
     } catch (error) {
-      console.warn('Error closing peer connection', error);
+      console.warn('關閉對等連線時發生錯誤', error);
     }
     updateSendControls();
-    webrtcTracker.setStatus('Closed');
+    webrtcTracker.setStatus('已關閉');
     updateStartButton();
   });
 
   dataChannel.addEventListener('error', (error) => {
-    console.error('Data channel error', error);
-    webrtcTracker.setStatus('Error (see console)');
+    console.error('資料通道發生錯誤', error);
+    webrtcTracker.setStatus('錯誤（詳見主控台）');
     updateStartButton();
   });
 
@@ -465,10 +454,10 @@ async function startWebRTCTransport() {
 
     const offerSdp = peerConnection.localDescription?.sdp;
     if (!offerSdp) {
-      throw new Error('Missing local SDP offer');
+      throw new Error('缺少本地 SDP offer');
     }
 
-    webrtcTracker.setStatus('Negotiating…');
+    webrtcTracker.setStatus('協商中…');
 
     const answerResponse = await fetch(
       `${REALTIME_BASE_URL}?model=${encodeURIComponent(REALTIME_MODEL)}`,
@@ -484,22 +473,16 @@ async function startWebRTCTransport() {
 
     if (!answerResponse.ok) {
       const errorText = await answerResponse.text();
-      throw new Error(
-        `OpenAI WebRTC negotiation failed (${answerResponse.status}): ${errorText}`
-      );
+      throw new Error(`OpenAI WebRTC 協商失敗（${answerResponse.status}）：${errorText}`);
     }
 
     const answerSdp = await answerResponse.text();
     await peerConnection.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-    webrtcTracker.setStatus('Waiting for channel…');
+    webrtcTracker.setStatus('等待資料通道…');
   } catch (error) {
-    console.error('WebRTC negotiation failed', error);
-    appendMessage(
-      webrtcState.messagesEl,
-      'error',
-      error.message || 'WebRTC negotiation failed'
-    );
-    webrtcTracker.setStatus('Error (see console)');
+    console.error('WebRTC 協商失敗', error);
+    appendMessage(webrtcState.messagesEl, 'error', error.message || 'WebRTC 協商失敗');
+    webrtcTracker.setStatus('錯誤（詳見主控台）');
     peerConnection.close();
     webrtcState.connection = null;
     webrtcState.dataChannel = null;
@@ -520,9 +503,7 @@ async function startWebRTCTransport() {
       return false;
     }
     const clientMessageId = crypto.randomUUID();
-    channel.send(
-      JSON.stringify(buildResponseCreateEvent(message, clientMessageId))
-    );
+    channel.send(JSON.stringify(buildResponseCreateEvent(message, clientMessageId)));
     webrtcState.pendingMessages.set(clientMessageId, {
       start: performance.now(),
     });
@@ -534,7 +515,7 @@ async function startWebRTCTransport() {
 startButton.addEventListener('click', () => {
   startButton.disabled = true;
   hasAttemptedConnection = true;
-  startButton.textContent = 'Connecting…';
+  startButton.textContent = '連線中…';
   startWebSocketTransport();
   startWebRTCTransport();
   updateStartButton();
@@ -551,16 +532,9 @@ messageForm.addEventListener('submit', (event) => {
   const sentViaWebRTC = webrtcState.send ? webrtcState.send(text) : false;
 
   if (!sentViaWS && !sentViaWebRTC) {
-    appendMessage(
-      wsState.messagesEl,
-      'error',
-      'Unable to send message. Please ensure a transport is connected.'
-    );
-    appendMessage(
-      webrtcState.messagesEl,
-      'error',
-      'Unable to send message. Please ensure a transport is connected.'
-    );
+    const errorText = '無法傳送訊息，請確認至少有一種傳輸方式已連線。';
+    appendMessage(wsState.messagesEl, 'error', errorText);
+    appendMessage(webrtcState.messagesEl, 'error', errorText);
     return;
   }
 

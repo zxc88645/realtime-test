@@ -4,7 +4,10 @@
   "description": "Demo project comparing WebRTC data channels and WebSocket latency",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "jest"
   },
   "license": "MIT",
   "dependencies": {
@@ -12,5 +15,10 @@
     "node-pre-gyp": "^0.17.0",
     "wrtc": "^0.4.7",
     "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "prettier": "^3.2.5",
+    "supertest": "^6.3.4"
   }
 }

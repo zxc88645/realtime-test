@@ -1,118 +1,109 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GPT Realtime Latency Lab</title>
+    <title>GPT 即時延遲實驗室</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main>
-      <h1>GPT Realtime Latency Lab</h1>
+      <h1>GPT 即時延遲實驗室</h1>
       <p>
-        Click <strong>Connect</strong> to open both a WebSocket bridge and a WebRTC
-        data channel to OpenAI's Realtime API. Once connected, type a message and
-        send it to talk with GPT. Each transport reports the round-trip latency
-        between sending your request and receiving the model's completed reply.
+        按下 <strong>連線</strong> 以建立前往 OpenAI Realtime API 的 WebSocket 橋接與
+        WebRTC 資料通道。連線成功後輸入訊息並送出，就能同時透過 兩種傳輸方式與 GPT
+        對話，並比較從送出到完成回覆的往返延遲。
       </p>
 
       <p class="api-note">
-        The demo server needs <code>OPENAI_API_KEY</code> in its environment to
-        proxy requests to OpenAI. Without it, the transports will fail with a
-        descriptive error.
+        範例伺服器需要在環境變數中設定 <code>OPENAI_API_KEY</code> 才能代理 前往
+        OpenAI。若缺少金鑰，兩種傳輸都會回報明確的錯誤。
       </p>
 
-      <button id="start">Connect</button>
+      <button id="start">連線</button>
 
       <form id="message-form" class="message-form">
-        <label for="message">Send a message to GPT once either transport is ready:</label>
+        <label for="message">任一傳輸準備就緒後，傳訊給 GPT：</label>
         <div class="message-controls">
           <input
             id="message"
             name="message"
             type="text"
-            placeholder="Ask GPT something…"
+            placeholder="問 GPT 一個問題…"
             autocomplete="off"
             required
             disabled
           />
-          <button id="send" type="submit" disabled>Send</button>
+          <button id="send" type="submit" disabled>送出</button>
         </div>
-        <p class="hint">
-          Your prompt is dispatched to both transports simultaneously so you can
-          compare their responses and latency.
-        </p>
+        <p class="hint">你的提示會同時送往兩種傳輸，以便比較回應內容與延遲。</p>
       </form>
 
       <section class="results" id="ws-result">
         <h2>WebSocket</h2>
         <dl>
           <div>
-            <dt>Status</dt>
-            <dd class="status">Idle</dd>
+            <dt>狀態</dt>
+            <dd class="status">待命</dd>
           </div>
           <div>
-            <dt>Latest latency</dt>
+            <dt>最新延遲</dt>
             <dd class="latest">–</dd>
           </div>
           <div>
-            <dt>Average latency</dt>
+            <dt>平均延遲</dt>
             <dd class="average">–</dd>
           </div>
           <div>
-            <dt>Samples</dt>
+            <dt>樣本數</dt>
             <dd class="samples">0</dd>
           </div>
         </dl>
         <div class="chat">
-          <h3>Conversation</h3>
+          <h3>對話內容</h3>
           <div class="messages" aria-live="polite"></div>
         </div>
       </section>
 
       <section class="results" id="webrtc-result">
-        <h2>WebRTC Data Channel</h2>
+        <h2>WebRTC 資料通道</h2>
         <dl>
           <div>
-            <dt>Status</dt>
-            <dd class="status">Idle</dd>
+            <dt>狀態</dt>
+            <dd class="status">待命</dd>
           </div>
           <div>
-            <dt>Latest latency</dt>
+            <dt>最新延遲</dt>
             <dd class="latest">–</dd>
           </div>
           <div>
-            <dt>Average latency</dt>
+            <dt>平均延遲</dt>
             <dd class="average">–</dd>
           </div>
           <div>
-            <dt>Samples</dt>
+            <dt>樣本數</dt>
             <dd class="samples">0</dd>
           </div>
         </dl>
         <div class="chat">
-          <h3>Conversation</h3>
+          <h3>對話內容</h3>
           <div class="messages" aria-live="polite"></div>
         </div>
       </section>
 
       <section class="notes">
-        <h2>How it works</h2>
+        <h2>運作流程</h2>
         <ol>
           <li>
-            The server proxies WebSocket connections to OpenAI's
-            <code>/v1/realtime</code> endpoint and can mint ephemeral keys for
-            browser-side WebRTC sessions.
+            伺服器會將 WebSocket 連線代理至 OpenAI 的
+            <code>/v1/realtime</code> 端點，並能簽發瀏覽器使用的 WebRTC 短效金鑰。
           </li>
           <li>
-            When you send a message, both transports issue identical
-            <code>response.create</code> events so GPT receives the same prompt
-            twice.
+            當你送出訊息時，兩種傳輸都會發送相同的
+            <code>response.create</code> 事件，讓 GPT 收到一致的提示。
           </li>
           <li>
-            The page timestamps each request and records the time until GPT
-            signals the response is complete, updating the latency dashboard in
-            real time.
+            頁面會記錄每次請求的時間點，直到 GPT 宣告回覆完成為止，並即時 更新延遲儀表板。
           </li>
         </ol>
       </section>
