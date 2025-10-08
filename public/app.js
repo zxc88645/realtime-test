@@ -3,6 +3,7 @@ import {
   computed,
   reactive,
   ref,
+  watch,
 } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
 
 const REALTIME_MODEL = 'gpt-4o-realtime-preview-2024-12-17';
@@ -16,6 +17,24 @@ const ROLE_LABELS = {
   'gpt-webrtc': 'GPT（WebRTC）',
   error: '錯誤',
 };
+
+const MODE_LABELS = {
+  ws: 'WebSocket',
+  webrtc: 'WebRTC 資料通道',
+};
+
+const MODE_OPTIONS = [
+  {
+    id: 'ws',
+    label: MODE_LABELS.ws,
+    description: '透過伺服器橋接至 OpenAI Realtime API。',
+  },
+  {
+    id: 'webrtc',
+    label: MODE_LABELS.webrtc,
+    description: '使用瀏覽器直接與模型建立資料通道。',
+  },
+];
 
 function createTransportContext(id) {
   return reactive({
@@ -32,6 +51,7 @@ function createTransportContext(id) {
     latencies: [],
     pendingMessages: new Map(),
     responsesById: new Map(),
+    manualStop: false,
   });
 }
 
@@ -231,6 +251,62 @@ function buildResponseCreateEvent(text, clientMessageId) {
   };
 }
 
+function stopWebSocketTransport(transport) {
+  if (!transport) {
+    return;
+  }
+  const hadConnection = !!transport.connection;
+  transport.manualStop = hadConnection;
+  if (hadConnection) {
+    try {
+      transport.connection.close();
+    } catch (error) {
+      console.warn('關閉 WebSocket 連線時發生錯誤', error);
+    }
+  }
+  transport.connection = null;
+  transport.send = undefined;
+  transport.isReady = false;
+  transport.pendingMessages.clear();
+  transport.responsesById.clear();
+  transport.status = '待命';
+  if (!hadConnection) {
+    transport.manualStop = false;
+  }
+}
+
+function stopWebRTCTransport(transport) {
+  if (!transport) {
+    return;
+  }
+  const hadConnection = !!transport.connection || !!transport.dataChannel;
+  transport.manualStop = hadConnection;
+  if (transport.dataChannel) {
+    try {
+      transport.dataChannel.close();
+    } catch (error) {
+      console.warn('關閉資料通道時發生錯誤', error);
+    }
+  }
+  if (transport.connection) {
+    try {
+      transport.connection.close();
+    } catch (error) {
+      console.warn('關閉 WebRTC 連線時發生錯誤', error);
+    }
+  }
+  transport.connection = null;
+  transport.dataChannel = null;
+  transport.send = undefined;
+  transport.isReady = false;
+  transport.pendingMessages.clear();
+  transport.responsesById.clear();
+  transport.status = '待命';
+  if (!hadConnection) {
+    transport.manualStop = false;
+  }
+}
+
 function startWebSocketTransport(transport) {
   if (transport.connection) {
     try {
@@ -276,7 +352,8 @@ function startWebSocketTransport(transport) {
     transport.send = undefined;
     transport.pendingMessages.clear();
     transport.responsesById.clear();
-    transport.status = '已關閉';
+    transport.status = transport.manualStop ? '待命' : '已關閉';
+    transport.manualStop = false;
   });
 
   socket.addEventListener('error', (error) => {
@@ -374,7 +451,8 @@ async function startWebRTCTransport(transport) {
     transport.send = undefined;
     transport.pendingMessages.clear();
     transport.responsesById.clear();
-    transport.status = '已關閉';
+    transport.status = transport.manualStop ? '待命' : '已關閉';
+    transport.manualStop = false;
     try {
       peerConnection.close();
     } catch (error) {
@@ -450,6 +528,7 @@ async function startWebRTCTransport(transport) {
     transport.send = undefined;
     transport.pendingMessages.clear();
     transport.responsesById.clear();
+    transport.manualStop = false;
     return;
   }
 
@@ -476,35 +555,47 @@ const app = createApp({
   setup() {
     const message = ref('');
     const messageInputRef = ref(null);
-    const hasAttemptedConnection = ref(false);
+    const hasAttemptedConnection = reactive({ ws: false, webrtc: false });
+    const selectedMode = ref('ws');
 
     const ws = createTransportContext('ws');
     const webrtc = createTransportContext('webrtc');
 
-    const isConnecting = computed(
-      () => (!!ws.connection && !ws.isReady) || (!!webrtc.connection && !webrtc.isReady)
-    );
+    const activeTransport = computed(() => (selectedMode.value === 'ws' ? ws : webrtc));
+
+    const activeModeLabel = computed(() => MODE_LABELS[selectedMode.value]);
+
+    const isConnecting = computed(() => {
+      const transport = activeTransport.value;
+      return !!transport.connection && !transport.isReady;
+    });
 
     const startLabel = computed(() => {
-      if (ws.isReady || webrtc.isReady) {
+      const transport = activeTransport.value;
+      if (transport.isReady) {
         return '已連線';
       }
       if (isConnecting.value) {
         return '連線中…';
       }
-      return hasAttemptedConnection.value ? '重新連線' : '連線';
+      return hasAttemptedConnection[selectedMode.value] ? '重新連線' : '連線';
     });
 
     const startDisabled = computed(
-      () => ws.isReady || webrtc.isReady || isConnecting.value
+      () => activeTransport.value.isReady || isConnecting.value
     );
 
-    const canSend = computed(() => ws.isReady || webrtc.isReady);
+    const canSend = computed(() => activeTransport.value.isReady);
 
     const onStartClick = () => {
-      hasAttemptedConnection.value = true;
-      startWebSocketTransport(ws);
-      startWebRTCTransport(webrtc);
+      hasAttemptedConnection[selectedMode.value] = true;
+      if (selectedMode.value === 'ws') {
+        stopWebRTCTransport(webrtc);
+        startWebSocketTransport(ws);
+      } else {
+        stopWebSocketTransport(ws);
+        startWebRTCTransport(webrtc);
+      }
     };
 
     const sendMessage = () => {
@@ -513,13 +604,12 @@ const app = createApp({
         return;
       }
 
-      const sentViaWS = ws.send ? ws.send(text) : false;
-      const sentViaWebRTC = webrtc.send ? webrtc.send(text) : false;
+      const transport = activeTransport.value;
+      const sent = transport.send ? transport.send(text) : false;
 
-      if (!sentViaWS && !sentViaWebRTC) {
-        const errorText = '無法傳送訊息，請確認至少有一種傳輸方式已連線。';
-        appendMessage(ws, 'error', errorText);
-        appendMessage(webrtc, 'error', errorText);
+      if (!sent) {
+        const errorText = '無法傳送訊息，請確認所選模式已連線。';
+        appendMessage(transport, 'error', errorText);
         return;
       }
 
@@ -529,11 +619,28 @@ const app = createApp({
       }
     };
 
+    watch(selectedMode, (next, previous) => {
+      if (previous === next) {
+        return;
+      }
+      if (previous === 'ws') {
+        stopWebSocketTransport(ws);
+      } else {
+        stopWebRTCTransport(webrtc);
+      }
+      message.value = '';
+    });
+
     return {
       message,
       messageInputRef,
       ws,
       webrtc,
+      activeTransport,
+      activeModeLabel,
+      selectedMode,
+      modeOptions: MODE_OPTIONS,
+      MODE_LABELS,
       startLabel,
       startDisabled,
       canSend,
