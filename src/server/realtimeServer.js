@@ -9,17 +9,24 @@ const {
   createRealtimeWebSocketHandler,
 } = require('../websocket/createRealtimeWebSocketHandler');
 const { createUpgradeHandler } = require('./createUpgradeHandler');
+const {
+  createRealtimeSessionService,
+} = require('../services/createRealtimeSessionService');
 
 function createRealtimeServer(options = {}) {
   const config = buildConfig(options);
 
   const app = createExpressApp({ publicDirectory: config.publicDirectory });
 
-  registerEphemeralTokenRoute(app, {
-    apiKey: config.apiKey,
+  const sessionService = createRealtimeSessionService({
+    createOpenAIClient: config.createOpenAIClient,
     realtimeModel: config.realtimeModel,
     realtimeVoice: config.realtimeVoice,
-    createOpenAIClient: config.createOpenAIClient,
+  });
+
+  registerEphemeralTokenRoute(app, {
+    apiKey: config.apiKey,
+    sessionService,
   });
 
   const server = http.createServer(app);
