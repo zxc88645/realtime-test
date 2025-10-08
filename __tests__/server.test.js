@@ -47,12 +47,53 @@ class MockSocket extends EventEmitter {
   triggerError(error) {
     this.emit('error', error);
   }
+
+  addEventListener(event, handler) {
+    this.on(event, handler);
+  }
+
+  removeEventListener(event, handler) {
+    this.off(event, handler);
+  }
 }
 
 MockSocket.CONNECTING = 0;
 MockSocket.OPEN = 1;
 MockSocket.CLOSING = 2;
 MockSocket.CLOSED = 3;
+
+class MockRealtimeTransport {
+  constructor(socket) {
+    this.socket = socket;
+    this.status = 'disconnected';
+    this.connectionState = { status: 'disconnected', websocket: undefined };
+    this.sendEvent = jest.fn();
+    this.close = jest.fn(() => {
+      this.status = 'disconnected';
+      if (
+        this.connectionState.websocket &&
+        typeof this.connectionState.websocket.close === 'function'
+      ) {
+        this.connectionState.websocket.close();
+      }
+    });
+  }
+
+  async connect(options) {
+    this.connectOptions = options;
+    this.status = 'connecting';
+    return new Promise((resolve) => {
+      setImmediate(() => {
+        this.status = 'connected';
+        this.connectionState = { status: 'connected', websocket: this.socket };
+        if (typeof this.socket.triggerOpen === 'function') {
+          this.socket.triggerOpen();
+        }
+        resolve();
+      });
+    });
+  }
+}
 
 describe('createRealtimeServer', () => {
   test('回報缺少金鑰的錯誤訊息', async () => {
@@ -174,40 +215,46 @@ describe('createRealtimeWebSocketHandler', () => {
     expect(clientSocket.closed).toBe(true);
   });
 
-  test('成功連線後會回傳狀態並轉發訊息', () => {
+  test('成功連線後會回傳狀態並轉發訊息', async () => {
     const upstreamSocket = new MockSocket();
-    const createUpstream = jest.fn(() => upstreamSocket);
+    const createRealtimeTransport = jest.fn(
+      () => new MockRealtimeTransport(upstreamSocket)
+    );
 
     const handler = createRealtimeWebSocketHandler({
       apiKey: 'key',
       realtimeModel: 'test-model',
       realtimeVoice: 'verse',
-      realtimeBaseUrl: 'wss://example',
-      webSocketImpl: MockSocket,
-      createUpstream,
+      realtimeBaseUrl: 'https://example',
+      createRealtimeTransport,
     });
 
     const clientSocket = new MockSocket();
     clientSocket.readyState = MockSocket.OPEN;
-    handler(clientSocket);
+    const connectPromise = handler(clientSocket);
 
-    expect(createUpstream).toHaveBeenCalledWith(
-      expect.stringContaining('model=test-model'),
-      expect.objectContaining({
-        headers: expect.objectContaining({ 'Sec-WebSocket-Protocol': 'realtime' }),
-      })
-    );
+    expect(createRealtimeTransport).toHaveBeenCalledTimes(1);
 
     clientSocket.emit('message', 'queued-message');
-    expect(upstreamSocket.sent).toHaveLength(0);
 
-    upstreamSocket.triggerOpen();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const transport = createRealtimeTransport.mock.results[0].value;
+    expect(transport.connectOptions).toMatchObject({
+      apiKey: 'key',
+      model: 'test-model',
+    });
+    expect(transport.connectOptions.url).toContain('model=test-model');
+    expect(transport.connectOptions.url).toContain('voice=verse');
+    expect(transport.sendEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'session.update' })
+    );
+
     expect(clientSocket.sent).toContainEqual(
       expect.stringContaining('"type":"server.status"')
     );
     expect(upstreamSocket.sent).toContain('queued-message');
 
-    upstreamSocket.readyState = MockSocket.OPEN;
     upstreamSocket.triggerMessage('server-payload');
     expect(clientSocket.sent).toContain('server-payload');
 
@@ -217,38 +264,37 @@ describe('createRealtimeWebSocketHandler', () => {
       (item) => item.includes('"status"') && item.includes('bye')
     );
     expect(statusPayload).toBeTruthy();
+
+    await connectPromise;
   });
 
-  test('自訂上游工廠會收到 realtime 子通訊協定', () => {
+  test('自訂傳輸層可取得連線參數', async () => {
     const upstreamSocket = new MockSocket();
-    const createUpstream = jest.fn((url, protocols, config) => {
-      expect(protocols).toEqual(['realtime']);
-      expect(config.headers.Authorization).toBe('Bearer key');
-      return upstreamSocket;
-    });
+    const createRealtimeTransport = jest.fn(
+      () => new MockRealtimeTransport(upstreamSocket)
+    );
 
     const handler = createRealtimeWebSocketHandler({
       apiKey: 'key',
       realtimeModel: 'test-model',
       realtimeVoice: 'verse',
       realtimeBaseUrl: 'wss://example',
-      webSocketImpl: MockSocket,
-      createUpstream,
+      createRealtimeTransport,
     });
 
     const clientSocket = new MockSocket();
     clientSocket.readyState = MockSocket.OPEN;
-    handler(clientSocket);
+    const connectPromise = handler(clientSocket);
 
-    expect(createUpstream).toHaveBeenCalledWith(
-      expect.stringContaining('voice=verse'),
-      ['realtime'],
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer key',
-          'OpenAI-Beta': 'realtime=v1',
-        }),
-      })
-    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const transport = createRealtimeTransport.mock.results[0].value;
+    expect(transport.connectOptions).toEqual({
+      apiKey: 'key',
+      model: 'test-model',
+      url: expect.stringContaining('voice=verse'),
+    });
+
+    await connectPromise;
   });
 });

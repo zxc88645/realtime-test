@@ -1,4 +1,74 @@
-const { WebSocket } = require('ws');
+const { OpenAIRealtimeWebSocket } = require('@openai/agents-realtime');
+
+function resolveReadyState(socket, stateName, fallback) {
+  if (!socket || typeof socket[stateName] !== 'number') {
+    return fallback;
+  }
+  return socket[stateName];
+}
+
+function isSocketOpen(socket) {
+  if (!socket) {
+    return false;
+  }
+  const openState = resolveReadyState(socket, 'OPEN', 1);
+  return socket.readyState === openState;
+}
+
+function isSocketConnecting(socket) {
+  if (!socket) {
+    return false;
+  }
+  const connectingState = resolveReadyState(socket, 'CONNECTING', 0);
+  return socket.readyState === connectingState;
+}
+
+function normalizeMessagePayload(payload) {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+  if (Buffer.isBuffer(payload)) {
+    return payload.toString('utf8');
+  }
+  if (payload && typeof payload === 'object') {
+    if (typeof payload.data === 'string') {
+      return payload.data;
+    }
+    if (Buffer.isBuffer(payload.data)) {
+      return payload.data.toString('utf8');
+    }
+    if (typeof payload.toString === 'function' && payload !== payload.toString()) {
+      return payload.toString();
+    }
+  }
+  return '';
+}
+
+function resolveRealtimeWebSocketUrl(realtimeBaseUrl, realtimeModel, realtimeVoice) {
+  if (!realtimeBaseUrl) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(realtimeBaseUrl);
+    if (url.protocol === 'https:') {
+      url.protocol = 'wss:';
+    } else if (url.protocol === 'http:') {
+      url.protocol = 'ws:';
+    }
+
+    if (realtimeModel) {
+      url.searchParams.set('model', realtimeModel);
+    }
+    if (realtimeVoice) {
+      url.searchParams.set('voice', realtimeVoice);
+    }
+
+    return url.toString();
+  } catch (_error) {
+    return undefined;
+  }
+}
 
 function createRealtimeWebSocketHandler(options) {
   const {
@@ -6,29 +76,19 @@ function createRealtimeWebSocketHandler(options) {
     realtimeModel,
     realtimeVoice,
     realtimeBaseUrl,
-    webSocketImpl = WebSocket,
-    createUpstream = (url, protocols, config) =>
-      protocols
-        ? new webSocketImpl(url, protocols, config)
-        : new webSocketImpl(url, config),
+    createRealtimeTransport,
   } = options;
 
-  const READY_STATE = {
-    CONNECTING:
-      typeof webSocketImpl.CONNECTING === 'number'
-        ? webSocketImpl.CONNECTING
-        : WebSocket.CONNECTING,
-    OPEN: typeof webSocketImpl.OPEN === 'number' ? webSocketImpl.OPEN : WebSocket.OPEN,
-    CLOSING:
-      typeof webSocketImpl.CLOSING === 'number'
-        ? webSocketImpl.CLOSING
-        : WebSocket.CLOSING,
-    CLOSED:
-      typeof webSocketImpl.CLOSED === 'number' ? webSocketImpl.CLOSED : WebSocket.CLOSED,
-  };
+  const upstreamUrl = resolveRealtimeWebSocketUrl(
+    realtimeBaseUrl,
+    realtimeModel,
+    realtimeVoice
+  );
 
-  const isSocketOpen = (socket) => socket?.readyState === READY_STATE.OPEN;
-  const isSocketConnecting = (socket) => socket?.readyState === READY_STATE.CONNECTING;
+  const createTransport =
+    typeof createRealtimeTransport === 'function'
+      ? createRealtimeTransport
+      : () => new OpenAIRealtimeWebSocket();
 
   return (clientSocket) => {
     console.log('WebSocket 用戶端已連線');
@@ -44,85 +104,93 @@ function createRealtimeWebSocketHandler(options) {
       return;
     }
 
-    const upstreamUrl = new URL(realtimeBaseUrl);
-    upstreamUrl.searchParams.set('model', realtimeModel);
-    if (realtimeVoice) {
-      upstreamUrl.searchParams.set('voice', realtimeVoice);
-    }
-
-    const upstreamHeaders = {
-      Authorization: `Bearer ${apiKey}`,
-      'OpenAI-Beta': 'realtime=v1',
-    };
-    const upstreamConfig = { headers: upstreamHeaders };
-    const upstreamProtocols = ['realtime'];
-
-    const upstream =
-      typeof createUpstream === 'function' && createUpstream.length >= 3
-        ? createUpstream(upstreamUrl.toString(), upstreamProtocols, upstreamConfig)
-        : createUpstream(upstreamUrl.toString(), {
-            ...upstreamConfig,
-            headers: {
-              ...upstreamHeaders,
-              'Sec-WebSocket-Protocol': upstreamProtocols.join(', '),
-            },
-          });
-
-    const pendingMessages = [];
-
-    upstream.on('open', () => {
-      console.log('已連線至 OpenAI 即時 WebSocket');
-
-      try {
-        const sessionUpdate = {
-          type: 'session.update',
-          session: {
-            input_audio_format: 'pcm16',
-            output_audio_format: 'pcm16',
-            input_audio_transcription: { model: 'whisper-1' },
-            modalities: ['audio', 'text'],
-            voice: realtimeVoice,
-            instructions:
-              '你是一位即時語音助理，請以親切的語氣提供語音與文字回覆，預設使用繁體中文。',
-          },
-        };
-        if (!realtimeVoice) {
-          delete sessionUpdate.session.voice;
-        }
-        upstream.send(JSON.stringify(sessionUpdate));
-      } catch (error) {
-        console.warn('初始化即時語音會話時發生錯誤', error);
-      }
-
-      try {
+    let upstreamTransport;
+    try {
+      upstreamTransport = createTransport();
+    } catch (error) {
+      console.error('建立 OpenAI 即時傳輸層時發生錯誤', error);
+      if (isSocketOpen(clientSocket) || isSocketConnecting(clientSocket)) {
         clientSocket.send(
           JSON.stringify({
-            type: 'server.status',
-            status: '已連線至 OpenAI（語音已啟用）',
+            type: 'error',
+            error: { message: 'OpenAI 即時連線初始化失敗。' },
           })
         );
-      } catch (error) {
-        console.warn('傳送狀態訊息給用戶端時失敗', error);
+        clientSocket.close();
+      }
+      return;
+    }
+
+    const pendingMessages = [];
+    const upstreamListeners = [];
+
+    const addUpstreamListener = (socket, event, handler) => {
+      if (!socket) {
+        return;
+      }
+      if (typeof socket.addEventListener === 'function') {
+        socket.addEventListener(event, handler);
+        upstreamListeners.push(() => {
+          try {
+            socket.removeEventListener(event, handler);
+          } catch (_error) {
+            // ignore listener removal error
+          }
+        });
+        return;
       }
 
-      while (pendingMessages.length && isSocketOpen(upstream)) {
-        upstream.send(pendingMessages.shift());
+      if (typeof socket.on === 'function') {
+        socket.on(event, handler);
+        upstreamListeners.push(() => {
+          try {
+            if (typeof socket.off === 'function') {
+              socket.off(event, handler);
+            } else if (typeof socket.removeListener === 'function') {
+              socket.removeListener(event, handler);
+            }
+          } catch (_error) {
+            // ignore listener removal error
+          }
+        });
       }
-    });
+    };
 
-    upstream.on('message', (message) => {
-      if (isSocketOpen(clientSocket)) {
-        clientSocket.send(message);
+    const detachUpstreamListeners = () => {
+      while (upstreamListeners.length) {
+        const remove = upstreamListeners.pop();
+        try {
+          remove();
+        } catch (_error) {
+          // ignore listener removal error
+        }
       }
-    });
+    };
 
-    upstream.on('close', (code, reason) => {
+    const flushPendingMessages = (socket) => {
+      if (!socket) {
+        return;
+      }
+      while (pendingMessages.length && upstreamTransport?.status === 'connected') {
+        const payload = pendingMessages.shift();
+        try {
+          socket.send(payload);
+        } catch (error) {
+          console.warn('傳送暫存訊息至上游時失敗', error);
+          pendingMessages.unshift(payload);
+          break;
+        }
+      }
+    };
+
+    const handleUpstreamClose = (code, reason) => {
       const readableReason = Buffer.isBuffer(reason)
         ? reason.toString('utf8')
         : typeof reason === 'string'
           ? reason
           : '';
       console.log('上游 WebSocket 已關閉', code, readableReason);
+      detachUpstreamListeners();
       if (isSocketOpen(clientSocket)) {
         clientSocket.send(
           JSON.stringify({
@@ -133,10 +201,11 @@ function createRealtimeWebSocketHandler(options) {
         );
         clientSocket.close();
       }
-    });
+    };
 
-    upstream.on('error', (error) => {
+    const handleUpstreamError = (error) => {
       console.error('上游 WebSocket 發生錯誤', error);
+      detachUpstreamListeners();
       if (isSocketOpen(clientSocket)) {
         clientSocket.send(
           JSON.stringify({
@@ -146,30 +215,127 @@ function createRealtimeWebSocketHandler(options) {
         );
         clientSocket.close();
       }
-    });
+    };
+
+    const connectPromise = upstreamTransport
+      .connect({
+        apiKey,
+        model: realtimeModel,
+        url: upstreamUrl,
+      })
+      .then(() => {
+        const upstreamSocket = upstreamTransport.connectionState?.websocket;
+        if (!upstreamSocket) {
+          throw new Error('OpenAI WebSocket 尚未建立');
+        }
+
+        addUpstreamListener(upstreamSocket, 'message', (message) => {
+          const payload = normalizeMessagePayload(message);
+          if (!payload) {
+            return;
+          }
+          if (isSocketOpen(clientSocket)) {
+            try {
+              clientSocket.send(payload);
+            } catch (error) {
+              console.warn('轉送上游訊息至用戶端時發生錯誤', error);
+            }
+          }
+        });
+
+        addUpstreamListener(upstreamSocket, 'close', handleUpstreamClose);
+        addUpstreamListener(upstreamSocket, 'error', handleUpstreamError);
+
+        try {
+          const sessionUpdate = {
+            type: 'session.update',
+            session: {
+              input_audio_format: 'pcm16',
+              output_audio_format: 'pcm16',
+              input_audio_transcription: { model: 'whisper-1' },
+              modalities: ['audio', 'text'],
+              voice: realtimeVoice,
+              instructions:
+                '你是一位即時語音助理，請以親切的語氣提供語音與文字回覆，預設使用繁體中文。',
+            },
+          };
+          if (!realtimeVoice) {
+            delete sessionUpdate.session.voice;
+          }
+          upstreamTransport.sendEvent(sessionUpdate);
+        } catch (error) {
+          console.warn('初始化即時語音會話時發生錯誤', error);
+        }
+
+        if (isSocketOpen(clientSocket)) {
+          try {
+            clientSocket.send(
+              JSON.stringify({
+                type: 'server.status',
+                status: '已連線至 OpenAI（語音已啟用）',
+              })
+            );
+          } catch (error) {
+            console.warn('傳送狀態訊息給用戶端時失敗', error);
+          }
+        }
+
+        flushPendingMessages(upstreamSocket);
+      })
+      .catch((error) => {
+        console.error('連線至 OpenAI 即時服務失敗', error);
+        if (isSocketOpen(clientSocket)) {
+          clientSocket.send(
+            JSON.stringify({
+              type: 'error',
+              error: { message: 'OpenAI 即時連線失敗。' },
+            })
+          );
+          clientSocket.close();
+        }
+      });
 
     clientSocket.on('message', (message) => {
-      if (isSocketOpen(upstream)) {
-        upstream.send(message);
-      } else if (isSocketConnecting(upstream)) {
-        pendingMessages.push(message);
+      const payload = normalizeMessagePayload(message);
+      if (!payload) {
+        return;
+      }
+
+      const upstreamSocket = upstreamTransport.connectionState?.websocket;
+      if (upstreamSocket && upstreamTransport.status === 'connected') {
+        try {
+          upstreamSocket.send(payload);
+        } catch (error) {
+          console.warn('傳送訊息至上游時發生錯誤', error);
+        }
+      } else {
+        pendingMessages.push(payload);
       }
     });
 
     clientSocket.on('close', () => {
       console.log('WebSocket 用戶端已離線');
       pendingMessages.length = 0;
-      if (isSocketOpen(upstream) || isSocketConnecting(upstream)) {
-        upstream.close();
+      detachUpstreamListeners();
+      try {
+        upstreamTransport.close();
+      } catch (error) {
+        console.warn('關閉上游連線時發生錯誤', error);
       }
     });
 
     clientSocket.on('error', (error) => {
       console.error('用戶端 WebSocket 發生錯誤', error);
-      if (isSocketOpen(upstream) || isSocketConnecting(upstream)) {
-        upstream.close();
+      pendingMessages.length = 0;
+      detachUpstreamListeners();
+      try {
+        upstreamTransport.close();
+      } catch (closeError) {
+        console.warn('關閉上游連線時發生錯誤', closeError);
       }
     });
+
+    return connectPromise;
   };
 }
 
