@@ -4,126 +4,263 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GPT 即時延遲實驗室</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              surface: {
+                DEFAULT: '#0b1120',
+                muted: '#111c34',
+              },
+            },
+            fontFamily: {
+              sans: ['"Noto Sans TC"', '"Segoe UI"', 'system-ui', 'sans-serif'],
+            },
+          },
+        },
+      };
+    </script>
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
-    <div id="app">
-      <main>
-        <h1>GPT 即時延遲實驗室</h1>
-        <p>
-          按下 <strong>連線</strong> 以前，請先選擇要使用的傳輸模式。成功連線後輸入訊息並
-          送出，就能透過所選模式與 GPT 對話並觀察往返延遲。每次只能有一種通話模式處於
-          連線狀態。
-        </p>
-
-        <p class="api-note">
-          範例伺服器需要在環境變數中設定 <code>OPENAI_API_KEY</code> 才能代理 前往
-          OpenAI。若缺少金鑰，選定的傳輸模式會回報明確的錯誤。
-        </p>
-
-        <section class="mode-selector">
-          <h2>選擇通話模式</h2>
-          <fieldset>
-            <legend class="visually-hidden">可用的連線模式</legend>
-            <div class="mode-options">
-              <label v-for="option in modeOptions" :key="option.id" class="mode-option">
-                <input
-                  type="radio"
-                  name="mode"
-                  :value="option.id"
-                  v-model="selectedMode"
-                />
-                <span class="mode-info">
-                  <span class="mode-name">{{ option.label }}</span>
-                  <span class="mode-description">{{ option.description }}</span>
-                </span>
-              </label>
+  <body class="bg-surface text-slate-100">
+    <div id="app" class="min-h-screen">
+      <div class="flex min-h-screen flex-col">
+        <header class="border-b border-slate-800/60 bg-slate-900/50 backdrop-blur">
+          <div
+            class="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 py-6 lg:flex-row lg:items-center lg:justify-between"
+          >
+            <div class="space-y-2">
+              <p class="text-xs font-semibold uppercase tracking-[0.35em] text-sky-400">
+                Realtime Playground
+              </p>
+              <h1 class="text-3xl font-semibold tracking-tight">GPT 即時延遲實驗室</h1>
+              <p class="max-w-2xl text-sm text-slate-400">
+                按下
+                <strong class="font-semibold text-slate-100">連線</strong>
+                前先選擇傳輸模式。 成功建立連線後便能在同一個聊天面板中比較 WebSocket 與
+                WebRTC 的往返延遲。
+              </p>
             </div>
-          </fieldset>
-          <p class="hint">切換模式會立即結束目前的連線，需重新按下「連線」。</p>
-        </section>
-
-        <button id="start" type="button" @click="onStartClick" :disabled="startDisabled">
-          {{ startLabel }}
-        </button>
-
-        <form id="message-form" class="message-form" @submit.prevent="sendMessage">
-          <label for="message">{{ activeModeLabel }} 準備就緒後，傳訊給 GPT：</label>
-          <div class="message-controls">
-            <input
-              id="message"
-              ref="messageInputRef"
-              name="message"
-              type="text"
-              placeholder="問 GPT 一個問題…"
-              autocomplete="off"
-              required
-              v-model="message"
-              :disabled="!canSend"
-            />
-            <button id="send" type="submit" :disabled="!canSend">送出</button>
-          </div>
-          <p class="hint">訊息只會送往當前選定的模式，並記錄往返延遲。</p>
-        </form>
-
-        <section class="results" :id="`result-${activeTransport.id}`">
-          <h2>{{ activeModeLabel }}</h2>
-          <dl>
-            <div>
-              <dt>狀態</dt>
-              <dd class="status">{{ activeTransport.status }}</dd>
-            </div>
-            <div>
-              <dt>最新延遲</dt>
-              <dd class="latest">{{ activeTransport.latest }}</dd>
-            </div>
-            <div>
-              <dt>平均延遲</dt>
-              <dd class="average">{{ activeTransport.average }}</dd>
-            </div>
-            <div>
-              <dt>樣本數</dt>
-              <dd class="samples">{{ activeTransport.samples }}</dd>
-            </div>
-          </dl>
-          <div class="chat">
-            <h3>對話內容</h3>
-            <div class="messages" aria-live="polite">
-              <div
-                v-for="item in activeTransport.messages"
-                :key="item.id"
-                :class="['message', item.role]"
-              >
-                <span class="message-role">{{ roleLabel(item.role) }}</span>
-                <div class="message-bubble">
-                  <p class="message-text">{{ item.text || '（等待回覆…）' }}</p>
-                </div>
-              </div>
-              <p v-if="!activeTransport.messages.length" class="messages-empty">
-                尚未傳送任何訊息。
+            <div
+              class="rounded-2xl border border-slate-800/70 bg-slate-900/60 px-5 py-4 text-xs text-slate-400 shadow-lg shadow-slate-950/40"
+            >
+              <p>
+                範例伺服器需在環境變數中設定
+                <code class="font-mono text-slate-200">OPENAI_API_KEY</code>
+                才能代理請求；缺少金鑰時，所選模式會立即回報錯誤。
               </p>
             </div>
           </div>
-        </section>
+        </header>
 
-        <section class="notes">
-          <h2>運作流程</h2>
-          <ol>
-            <li>
-              伺服器會將 WebSocket 連線代理至 OpenAI 的
-              <code>/v1/realtime</code> 端點，並能簽發瀏覽器使用的 WebRTC 短效金鑰。
-            </li>
-            <li>
-              當你送出訊息時，所選模式會發送 <code>response.create</code>
-              事件，讓 GPT 收到你的提示。
-            </li>
-            <li>
-              頁面會記錄每次請求的時間點，直到 GPT 宣告回覆完成為止，並即時更新延遲
-              儀表板。
-            </li>
-          </ol>
-        </section>
-      </main>
+        <div class="mx-auto flex w-full max-w-[1400px] flex-1 flex-col lg:flex-row">
+          <aside
+            class="border-b border-slate-800/60 bg-slate-900/30 px-6 py-6 backdrop-blur lg:h-[calc(100vh-6rem)] lg:w-80 lg:border-b-0 lg:border-r lg:px-8 lg:py-10"
+          >
+            <div class="space-y-6">
+              <section class="space-y-4">
+                <h2 class="text-lg font-semibold text-slate-200">選擇通話模式</h2>
+                <fieldset class="space-y-4">
+                  <legend class="visually-hidden">可用的連線模式</legend>
+                  <div class="flex flex-col gap-3">
+                    <label
+                      v-for="option in modeOptions"
+                      :key="option.id"
+                      class="group flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-800/70 bg-slate-900/40 px-4 py-3 text-left shadow-sm transition hover:border-sky-500/60 hover:bg-slate-900/60"
+                    >
+                      <input
+                        type="radio"
+                        name="mode"
+                        :value="option.id"
+                        v-model="selectedMode"
+                        class="mt-1 h-5 w-5 border-slate-600 text-sky-400 focus:ring-sky-500"
+                      />
+                      <span class="flex-1 space-y-1">
+                        <span class="block text-base font-medium text-slate-100"
+                          >{{ option.label }}</span
+                        >
+                        <span class="block text-sm text-slate-400"
+                          >{{ option.description }}</span
+                        >
+                      </span>
+                    </label>
+                  </div>
+                </fieldset>
+                <p
+                  class="rounded-xl border border-slate-800/70 bg-slate-900/40 px-4 py-3 text-xs text-slate-400"
+                >
+                  切換模式會立即結束目前的連線，需要重新按下「連線」。
+                </p>
+              </section>
+
+              <section class="space-y-3">
+                <h2 class="text-lg font-semibold text-slate-200">連線控制</h2>
+                <button
+                  id="start"
+                  type="button"
+                  class="flex w-full items-center justify-center gap-2 rounded-2xl bg-sky-500 px-5 py-3 text-sm font-semibold tracking-wide text-slate-950 shadow-lg shadow-sky-900/50 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300"
+                  @click="onStartClick"
+                  :disabled="startDisabled"
+                >
+                  {{ startLabel }}
+                </button>
+                <p class="text-xs leading-relaxed text-slate-400">
+                  {{ activeModeLabel }}
+                  會保持唯一通道。重新連線時會清除未完成的延遲樣本並重新建立連線。
+                </p>
+              </section>
+
+              <section class="space-y-3 text-sm text-slate-400">
+                <h2 class="text-lg font-semibold text-slate-200">操作提示</h2>
+                <ul class="space-y-2">
+                  <li class="flex gap-2">
+                    <span class="mt-1 h-1.5 w-1.5 rounded-full bg-sky-400"></span>
+                    <span
+                      >WebRTC
+                      需要麥克風權限才能傳輸即時語音；若拒絕權限，系統會自動改為僅接收。</span
+                    >
+                  </li>
+                  <li class="flex gap-2">
+                    <span class="mt-1 h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                    <span
+                      >傳送訊息後可觀察最新延遲、平均延遲與樣本數，協助比較不同傳輸模式。</span
+                    >
+                  </li>
+                  <li class="flex gap-2">
+                    <span class="mt-1 h-1.5 w-1.5 rounded-full bg-rose-400"></span>
+                    <span>錯誤訊息會直接出現在聊天面板中，方便排除故障。</span>
+                  </li>
+                </ul>
+              </section>
+            </div>
+          </aside>
+
+          <main
+            class="flex-1 bg-slate-950/40 px-6 pb-10 pt-6 lg:h-[calc(100vh-6rem)] lg:overflow-hidden lg:px-10 lg:pb-14 lg:pt-10"
+          >
+            <section
+              class="grid gap-4 rounded-3xl border border-slate-800/60 bg-slate-900/30 p-6 shadow-inner shadow-slate-950/40 backdrop-blur lg:grid-cols-4"
+            >
+              <article class="stat-card">
+                <h3>狀態</h3>
+                <p class="stat-value">{{ activeTransport.status }}</p>
+              </article>
+              <article class="stat-card">
+                <h3>最新延遲</h3>
+                <p class="stat-value">{{ activeTransport.latest }}</p>
+              </article>
+              <article class="stat-card">
+                <h3>平均延遲</h3>
+                <p class="stat-value">{{ activeTransport.average }}</p>
+              </article>
+              <article class="stat-card">
+                <h3>樣本數</h3>
+                <p class="stat-value">{{ activeTransport.samples }}</p>
+              </article>
+            </section>
+
+            <section class="mt-6 flex h-full flex-col gap-6 lg:mt-8">
+              <div
+                class="flex flex-1 flex-col overflow-hidden rounded-3xl border border-slate-800/60 bg-slate-900/50 shadow-xl shadow-slate-950/40"
+              >
+                <div
+                  class="flex flex-col gap-2 border-b border-slate-800/70 px-6 py-5 lg:flex-row lg:items-center lg:justify-between"
+                >
+                  <div>
+                    <h2 class="text-xl font-semibold text-slate-100">
+                      {{ activeModeLabel }} 聊天面板
+                    </h2>
+                    <p class="text-sm text-slate-400">
+                      所有訊息都會出現在這裡，方便直接比較兩種模式的輸出效果。
+                    </p>
+                  </div>
+                </div>
+                <div
+                  class="chat-scroll flex flex-1 flex-col gap-6 overflow-y-auto px-6 py-6"
+                  aria-live="polite"
+                >
+                  <template v-if="activeTransport.messages.length">
+                    <div
+                      v-for="item in activeTransport.messages"
+                      :key="item.id"
+                      :class="messageContainerClass(item.role)"
+                    >
+                      <span class="message-role-label">{{ roleLabel(item.role) }}</span>
+                      <div :class="messageBubbleClass(item.role)">
+                        <p class="leading-relaxed">{{ item.text || '（等待回覆…）' }}</p>
+                      </div>
+                    </div>
+                  </template>
+                  <p
+                    v-else
+                    class="rounded-2xl border border-dashed border-slate-700/60 bg-slate-900/40 px-6 py-10 text-center text-sm text-slate-400"
+                  >
+                    尚未傳送任何訊息。請先建立連線並輸入訊息開始對話。
+                  </p>
+                </div>
+                <form
+                  id="message-form"
+                  class="border-t border-slate-800/70 bg-slate-950/40 px-6 py-5"
+                  @submit.prevent="sendMessage"
+                >
+                  <label for="message" class="sr-only"
+                    >{{ activeModeLabel }} 準備就緒後，傳訊給 GPT</label
+                  >
+                  <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
+                    <input
+                      id="message"
+                      ref="messageInputRef"
+                      name="message"
+                      type="text"
+                      placeholder="問 GPT 一個問題…"
+                      autocomplete="off"
+                      required
+                      v-model="message"
+                      :disabled="!canSend"
+                      class="flex-1 rounded-2xl border border-slate-800/60 bg-slate-900/70 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-500/50 disabled:cursor-not-allowed disabled:bg-slate-800/40 disabled:text-slate-500"
+                    />
+                    <button
+                      id="send"
+                      type="submit"
+                      :disabled="!canSend"
+                      class="flex items-center justify-center rounded-2xl bg-sky-500 px-5 py-3 text-sm font-semibold tracking-wide text-slate-950 shadow-lg shadow-sky-900/40 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300"
+                    >
+                      送出
+                    </button>
+                  </div>
+                  <p class="mt-3 text-xs text-slate-500">
+                    訊息只會送往當前選定的模式，並會記錄自送出至回覆完成的往返延遲。
+                  </p>
+                </form>
+              </div>
+
+              <section
+                class="rounded-3xl border border-slate-800/60 bg-slate-900/40 p-6 text-sm text-slate-300 shadow-inner shadow-slate-950/40"
+              >
+                <h2 class="text-lg font-semibold text-slate-100">運作流程</h2>
+                <ol class="mt-4 space-y-3 list-decimal pl-6">
+                  <li>
+                    伺服器會將 WebSocket 連線代理至 OpenAI 的
+                    <code class="font-mono text-slate-200">/v1/realtime</code>
+                    端點，並能簽發瀏覽器使用的 WebRTC 短效金鑰。
+                  </li>
+                  <li>
+                    當你送出訊息時，所選模式會發送
+                    <code class="font-mono text-slate-200">response.create</code>
+                    事件，讓 GPT 收到你的提示並開始串流回覆。
+                  </li>
+                  <li>
+                    頁面會記錄每次請求的時間點，直到 GPT
+                    宣告回覆完成為止，並即時更新延遲儀表板。
+                  </li>
+                </ol>
+              </section>
+            </section>
+          </main>
+        </div>
+      </div>
     </div>
     <script src="app.js" type="module"></script>
   </body>

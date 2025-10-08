@@ -1,7 +1,31 @@
 const { WebSocket } = require('ws');
 
 function createRealtimeWebSocketHandler(options) {
-  const { apiKey, realtimeModel, realtimeVoice, realtimeBaseUrl } = options;
+  const {
+    apiKey,
+    realtimeModel,
+    realtimeVoice,
+    realtimeBaseUrl,
+    webSocketImpl = WebSocket,
+    createUpstream = (url, config) => new webSocketImpl(url, config),
+  } = options;
+
+  const READY_STATE = {
+    CONNECTING:
+      typeof webSocketImpl.CONNECTING === 'number'
+        ? webSocketImpl.CONNECTING
+        : WebSocket.CONNECTING,
+    OPEN: typeof webSocketImpl.OPEN === 'number' ? webSocketImpl.OPEN : WebSocket.OPEN,
+    CLOSING:
+      typeof webSocketImpl.CLOSING === 'number'
+        ? webSocketImpl.CLOSING
+        : WebSocket.CLOSING,
+    CLOSED:
+      typeof webSocketImpl.CLOSED === 'number' ? webSocketImpl.CLOSED : WebSocket.CLOSED,
+  };
+
+  const isSocketOpen = (socket) => socket?.readyState === READY_STATE.OPEN;
+  const isSocketConnecting = (socket) => socket?.readyState === READY_STATE.CONNECTING;
 
   return (clientSocket) => {
     console.log('WebSocket 用戶端已連線');
@@ -23,7 +47,7 @@ function createRealtimeWebSocketHandler(options) {
       upstreamUrl.searchParams.set('voice', realtimeVoice);
     }
 
-    const upstream = new WebSocket(upstreamUrl.toString(), {
+    const upstream = createUpstream(upstreamUrl.toString(), {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'OpenAI-Beta': 'realtime=v1',
@@ -41,13 +65,13 @@ function createRealtimeWebSocketHandler(options) {
       } catch (error) {
         console.warn('傳送狀態訊息給用戶端時失敗', error);
       }
-      while (pendingMessages.length && upstream.readyState === WebSocket.OPEN) {
+      while (pendingMessages.length && isSocketOpen(upstream)) {
         upstream.send(pendingMessages.shift());
       }
     });
 
     upstream.on('message', (message) => {
-      if (clientSocket.readyState === WebSocket.OPEN) {
+      if (isSocketOpen(clientSocket)) {
         clientSocket.send(message);
       }
     });
@@ -59,7 +83,7 @@ function createRealtimeWebSocketHandler(options) {
           ? reason
           : '';
       console.log('上游 WebSocket 已關閉', code, readableReason);
-      if (clientSocket.readyState === WebSocket.OPEN) {
+      if (isSocketOpen(clientSocket)) {
         clientSocket.send(
           JSON.stringify({
             type: 'server.status',
@@ -73,7 +97,7 @@ function createRealtimeWebSocketHandler(options) {
 
     upstream.on('error', (error) => {
       console.error('上游 WebSocket 發生錯誤', error);
-      if (clientSocket.readyState === WebSocket.OPEN) {
+      if (isSocketOpen(clientSocket)) {
         clientSocket.send(
           JSON.stringify({
             type: 'error',
@@ -85,9 +109,9 @@ function createRealtimeWebSocketHandler(options) {
     });
 
     clientSocket.on('message', (message) => {
-      if (upstream.readyState === WebSocket.OPEN) {
+      if (isSocketOpen(upstream)) {
         upstream.send(message);
-      } else if (upstream.readyState === WebSocket.CONNECTING) {
+      } else if (isSocketConnecting(upstream)) {
         pendingMessages.push(message);
       }
     });
@@ -95,20 +119,14 @@ function createRealtimeWebSocketHandler(options) {
     clientSocket.on('close', () => {
       console.log('WebSocket 用戶端已離線');
       pendingMessages.length = 0;
-      if (
-        upstream.readyState === WebSocket.OPEN ||
-        upstream.readyState === WebSocket.CONNECTING
-      ) {
+      if (isSocketOpen(upstream) || isSocketConnecting(upstream)) {
         upstream.close();
       }
     });
 
     clientSocket.on('error', (error) => {
       console.error('用戶端 WebSocket 發生錯誤', error);
-      if (
-        upstream.readyState === WebSocket.OPEN ||
-        upstream.readyState === WebSocket.CONNECTING
-      ) {
+      if (isSocketOpen(upstream) || isSocketConnecting(upstream)) {
         upstream.close();
       }
     });
