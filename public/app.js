@@ -12,6 +12,42 @@ const REALTIME_WS_PATH = '/openai/agents/realtime/ws';
 const REALTIME_EPHEMERAL_PATH = '/openai/agents/realtime/ephemeral-token';
 const REALTIME_VOICE = 'verse';
 
+const THEME_STORAGE_KEY = 'realtime-preferred-theme';
+const LANGUAGE_STORAGE_KEY = 'realtime-preferred-language';
+
+const LANGUAGE_OPTIONS = [
+  {
+    id: 'zh-Hant',
+    label: '繁體中文',
+    description: '以自然的繁體中文互動。',
+    prompt: '請全程使用繁體中文回覆，語氣親切且專業。',
+  },
+  {
+    id: 'en',
+    label: '英文',
+    description: '切換成英文對話與解說。',
+    prompt: '請改用英文回覆，保持語氣清楚且專業。',
+  },
+  {
+    id: 'ja',
+    label: '日文',
+    description: '以日文提供說明與建議。',
+    prompt: '請改用自然的日文回覆，並適度解釋專有名詞。',
+  },
+  {
+    id: 'ko',
+    label: '韓文',
+    description: '以韓文交流並維持禮貌語氣。',
+    prompt: '請改用韓文回覆，語氣禮貌且清楚。',
+  },
+  {
+    id: 'es',
+    label: '西班牙文',
+    description: '練習西班牙文的最佳夥伴。',
+    prompt: '請改用西班牙文回覆，並在需要時提供簡短的解釋。',
+  },
+];
+
 const ROLE_LABELS = {
   user: '你',
   'gpt-ws': 'GPT（WebSocket）',
@@ -28,17 +64,17 @@ const MODE_OPTIONS = [
   {
     id: 'ws',
     label: MODE_LABELS.ws,
-    description: '透過伺服器橋接至 OpenAI Realtime API。',
+    description: '透過伺服器橋接至 OpenAI Realtime API，適合純文字對話。',
   },
   {
     id: 'webrtc',
     label: MODE_LABELS.webrtc,
-    description: '使用瀏覽器直接與模型建立資料通道。',
+    description: '使用瀏覽器直接與模型建立資料通道，可即時語音互動。',
   },
 ];
 
 const MESSAGE_BASE_CLASS =
-  'max-w-3xl rounded-3xl border px-5 py-4 text-sm leading-7 shadow-lg backdrop-blur';
+  'message-bubble max-w-3xl rounded-3xl border px-5 py-4 text-sm leading-7 shadow-sm';
 
 function messageContainerClass(role) {
   if (role === 'user') {
@@ -49,12 +85,12 @@ function messageContainerClass(role) {
 
 function messageBubbleClass(role) {
   if (role === 'user') {
-    return `${MESSAGE_BASE_CLASS} border-sky-500/50 bg-sky-500/20 text-sky-100 shadow-sky-900/40`;
+    return `${MESSAGE_BASE_CLASS} message-bubble--user`;
   }
   if (role === 'error') {
-    return `${MESSAGE_BASE_CLASS} border-rose-500/40 bg-rose-500/15 text-rose-100 shadow-rose-900/30`;
+    return `${MESSAGE_BASE_CLASS} message-bubble--error`;
   }
-  return `${MESSAGE_BASE_CLASS} border-slate-700/60 bg-slate-800/70 text-slate-100 shadow-slate-950/40`;
+  return `${MESSAGE_BASE_CLASS} message-bubble--assistant`;
 }
 
 function createTransportContext(id) {
@@ -276,23 +312,37 @@ async function parseEventData(data) {
 }
 
 function buildResponseCreateEvent(text, clientMessageId, options = {}) {
-  const { includeAudio = false } = options;
+  const { includeAudio = false, language } = options;
+  const input = [];
+
+  if (language?.prompt) {
+    input.push({
+      role: 'system',
+      content: [
+        {
+          type: 'input_text',
+          text: language.prompt,
+        },
+      ],
+    });
+  }
+
+  input.push({
+    role: 'user',
+    content: [
+      {
+        type: 'input_text',
+        text,
+      },
+    ],
+  });
+
   const response = {
     metadata: {
       client_message_id: clientMessageId,
     },
     modalities: includeAudio ? ['text', 'audio'] : ['text'],
-    input: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'input_text',
-            text,
-          },
-        ],
-      },
-    ],
+    input,
   };
 
   if (includeAudio) {
@@ -587,7 +637,7 @@ function setTransceiverDirection(transceiver, direction) {
   }
 }
 
-function startWebSocketTransport(transport) {
+function startWebSocketTransport(transport, resolveLanguage) {
   if (transport.connection) {
     try {
       transport.connection.close();
@@ -616,7 +666,7 @@ function startWebSocketTransport(transport) {
 
   socket.addEventListener('open', () => {
     transport.isReady = true;
-    transport.status = '已連線';
+    transport.status = '已連線（文字互動）';
     while (queue.length && socket.readyState === WebSocket.OPEN) {
       socket.send(queue.shift());
     }
@@ -660,8 +710,12 @@ function startWebSocketTransport(transport) {
       return false;
     }
     const clientMessageId = crypto.randomUUID();
+    const language = typeof resolveLanguage === 'function' ? resolveLanguage() : null;
     const payload = JSON.stringify(
-      buildResponseCreateEvent(message, clientMessageId, { includeAudio: true })
+      buildResponseCreateEvent(message, clientMessageId, {
+        includeAudio: false,
+        language,
+      })
     );
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(payload);
@@ -678,7 +732,7 @@ function startWebSocketTransport(transport) {
   };
 }
 
-async function startWebRTCTransport(transport) {
+async function startWebRTCTransport(transport, resolveLanguage) {
   if (transport.connection) {
     try {
       transport.connection.close();
@@ -885,9 +939,13 @@ async function startWebRTCTransport(transport) {
       return false;
     }
     const clientMessageId = crypto.randomUUID();
+    const language = typeof resolveLanguage === 'function' ? resolveLanguage() : null;
     channel.send(
       JSON.stringify(
-        buildResponseCreateEvent(message, clientMessageId, { includeAudio: false })
+        buildResponseCreateEvent(message, clientMessageId, {
+          includeAudio: false,
+          language,
+        })
       )
     );
     transport.pendingMessages.set(clientMessageId, {
@@ -904,6 +962,102 @@ const app = createApp({
     const messageInputRef = ref(null);
     const hasAttemptedConnection = reactive({ ws: false, webrtc: false });
     const selectedMode = ref('ws');
+    const languageOptions = LANGUAGE_OPTIONS;
+
+    const languageMap = new Map(languageOptions.map((item) => [item.id, item]));
+    const getStoredLanguage = () => {
+      try {
+        const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+        if (stored && languageMap.has(stored)) {
+          return stored;
+        }
+      } catch (error) {
+        console.warn('讀取偏好語言時發生錯誤', error);
+      }
+      return languageOptions[0]?.id ?? 'zh-Hant';
+    };
+    const selectedLanguageId = ref(getStoredLanguage());
+    const activeLanguage = computed(
+      () => languageMap.get(selectedLanguageId.value) ?? languageOptions[0]
+    );
+
+    watch(
+      selectedLanguageId,
+      (value) => {
+        try {
+          localStorage.setItem(LANGUAGE_STORAGE_KEY, value);
+        } catch (error) {
+          console.warn('儲存偏好語言時發生錯誤', error);
+        }
+      },
+      { flush: 'post' }
+    );
+
+    const getPreferredTheme = () => {
+      try {
+        const stored = localStorage.getItem(THEME_STORAGE_KEY);
+        if (stored === 'light' || stored === 'dark') {
+          return stored;
+        }
+      } catch (error) {
+        console.warn('讀取主題偏好失敗', error);
+      }
+      const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+      return prefersDark ? 'dark' : 'light';
+    };
+
+    const theme = ref(getPreferredTheme());
+    const isDarkTheme = computed(() => theme.value === 'dark');
+    const themeToggleLabel = computed(() =>
+      isDarkTheme.value ? '切換至亮色模式' : '切換至深色模式'
+    );
+
+    const applyTheme = (value) => {
+      const themeValue = value === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', themeValue);
+      document.body?.setAttribute('data-theme', themeValue);
+    };
+
+    watch(
+      theme,
+      (value) => {
+        applyTheme(value);
+        try {
+          localStorage.setItem(THEME_STORAGE_KEY, value);
+        } catch (error) {
+          console.warn('儲存主題偏好失敗', error);
+        }
+      },
+      { immediate: true }
+    );
+
+    try {
+      const mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
+      const handleChange = (event) => {
+        const stored = (() => {
+          try {
+            return localStorage.getItem(THEME_STORAGE_KEY);
+          } catch (error) {
+            console.warn('讀取主題偏好失敗', error);
+            return null;
+          }
+        })();
+        if (!stored) {
+          theme.value = event.matches ? 'dark' : 'light';
+        }
+      };
+      if (mediaQuery?.addEventListener) {
+        mediaQuery.addEventListener('change', handleChange);
+      } else if (mediaQuery?.addListener) {
+        mediaQuery.addListener(handleChange);
+      }
+    } catch (error) {
+      console.warn('監聽系統主題偏好失敗', error);
+    }
+
+    const toggleTheme = () => {
+      theme.value = theme.value === 'dark' ? 'light' : 'dark';
+    };
 
     const ws = createTransportContext('ws');
     const webrtc = createTransportContext('webrtc');
@@ -911,6 +1065,11 @@ const app = createApp({
     const activeTransport = computed(() => (selectedMode.value === 'ws' ? ws : webrtc));
 
     const activeModeLabel = computed(() => MODE_LABELS[selectedMode.value]);
+
+    const activeModeDescription = computed(() => {
+      const option = MODE_OPTIONS.find((item) => item.id === selectedMode.value);
+      return option?.description ?? '';
+    });
 
     const isConnecting = computed(() => {
       const transport = activeTransport.value;
@@ -938,10 +1097,10 @@ const app = createApp({
       hasAttemptedConnection[selectedMode.value] = true;
       if (selectedMode.value === 'ws') {
         stopWebRTCTransport(webrtc);
-        startWebSocketTransport(ws);
+        startWebSocketTransport(ws, () => activeLanguage.value);
       } else {
         stopWebSocketTransport(ws);
-        startWebRTCTransport(webrtc);
+        startWebRTCTransport(webrtc, () => activeLanguage.value);
       }
     };
 
@@ -985,6 +1144,7 @@ const app = createApp({
       webrtc,
       activeTransport,
       activeModeLabel,
+      activeModeDescription,
       selectedMode,
       modeOptions: MODE_OPTIONS,
       MODE_LABELS,
@@ -996,6 +1156,13 @@ const app = createApp({
       roleLabel,
       messageContainerClass,
       messageBubbleClass,
+      languageOptions,
+      selectedLanguageId,
+      activeLanguage,
+      theme,
+      isDarkTheme,
+      toggleTheme,
+      themeToggleLabel,
     };
   },
 });
