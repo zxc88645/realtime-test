@@ -52,6 +52,9 @@ function createTransportContext(id) {
     pendingMessages: new Map(),
     responsesById: new Map(),
     manualStop: false,
+    localStream: null,
+    remoteStream: null,
+    audioElement: null,
   });
 }
 
@@ -281,6 +284,27 @@ function stopWebRTCTransport(transport) {
   }
   const hadConnection = !!transport.connection || !!transport.dataChannel;
   transport.manualStop = hadConnection;
+  if (transport.audioElement) {
+    try {
+      transport.audioElement.srcObject = null;
+    } catch (error) {
+      console.warn('清除音訊元素來源時發生錯誤', error);
+    }
+  }
+  if (transport.remoteStream) {
+    try {
+      transport.remoteStream.getTracks().forEach((track) => track.stop());
+    } catch (error) {
+      console.warn('停止遠端音訊軌時發生錯誤', error);
+    }
+  }
+  if (transport.localStream) {
+    try {
+      transport.localStream.getTracks().forEach((track) => track.stop());
+    } catch (error) {
+      console.warn('停止本地音訊軌時發生錯誤', error);
+    }
+  }
   if (transport.dataChannel) {
     try {
       transport.dataChannel.close();
@@ -301,9 +325,30 @@ function stopWebRTCTransport(transport) {
   transport.isReady = false;
   transport.pendingMessages.clear();
   transport.responsesById.clear();
+  transport.localStream = null;
+  transport.remoteStream = null;
   transport.status = '待命';
   if (!hadConnection) {
     transport.manualStop = false;
+  }
+}
+
+function setTransceiverDirection(transceiver, direction) {
+  if (!transceiver) {
+    return;
+  }
+  if (typeof transceiver.setDirection === 'function') {
+    try {
+      transceiver.setDirection(direction);
+      return;
+    } catch (error) {
+      console.warn('設定傳輸方向時發生錯誤', error);
+    }
+  }
+  try {
+    transceiver.direction = direction;
+  } catch (error) {
+    console.warn('無法直接設定傳輸方向', error);
   }
 }
 
@@ -429,6 +474,57 @@ async function startWebRTCTransport(transport) {
 
   const dataChannel = peerConnection.createDataChannel('oai-events');
   transport.dataChannel = dataChannel;
+
+  transport.remoteStream = new MediaStream();
+  if (!transport.audioElement) {
+    const audioElement = document.createElement('audio');
+    audioElement.autoplay = true;
+    audioElement.playsInline = true;
+    audioElement.controls = false;
+    audioElement.hidden = true;
+    document.body.appendChild(audioElement);
+    transport.audioElement = audioElement;
+  }
+  if (transport.audioElement) {
+    transport.audioElement.srcObject = transport.remoteStream;
+  }
+
+  const audioTransceiver = peerConnection.addTransceiver('audio', {
+    direction: 'sendrecv',
+  });
+
+  let localStream = null;
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    transport.localStream = localStream;
+    const [track] = localStream.getAudioTracks();
+    if (track) {
+      await audioTransceiver.sender.replaceTrack(track);
+      setTransceiverDirection(audioTransceiver, 'sendrecv');
+    } else {
+      setTransceiverDirection(audioTransceiver, 'recvonly');
+    }
+  } catch (error) {
+    console.warn('取得麥克風音訊失敗，將以僅接收模式繼續', error);
+    if (localStream) {
+      localStream.getTracks().forEach((track) => track.stop());
+    }
+    transport.localStream = null;
+    setTransceiverDirection(audioTransceiver, 'recvonly');
+  }
+
+  peerConnection.addEventListener('track', (event) => {
+    if (!transport.remoteStream) {
+      return;
+    }
+    transport.remoteStream.addTrack(event.track);
+    if (transport.audioElement) {
+      const playPromise = transport.audioElement.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => {});
+      }
+    }
+  });
 
   dataChannel.addEventListener('open', () => {
     transport.isReady = true;
