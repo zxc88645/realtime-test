@@ -1,40 +1,26 @@
-# GPT Realtime Latency Lab
+# GPT 即時延遲實驗室
 
-This project spins up a small Node.js server that exposes a WebSocket bridge and
-an endpoint for minting WebRTC ephemeral keys so you can connect to OpenAI's
-Realtime API from the browser. The web UI negotiates both transports, sends your
-prompt to GPT through each one, and compares the round-trip latency so you can
-see how they perform in your environment.
+本專案會啟動一個 Node.js 伺服器，提供 WebSocket 橋接服務與簽發 WebRTC 短效金鑰的端點，方便你在瀏覽器中連線至 OpenAI 的 Realtime API。網頁介面會同時協商這兩種傳輸方式，將同樣的提示詞送往 GPT，並比較回傳所需的時間，讓你掌握在本地環境中的效能差異。
 
-## Prerequisites
+## 必要條件
 
-- Node.js 18 or newer (required for native `fetch` and browser-compatible APIs)
+- Node.js 18 或更新版本（提供原生 `fetch` 與相容於瀏覽器的 API）
 - npm
-- An OpenAI API key with access to the Realtime API
+- 具有 Realtime API 存取權的 OpenAI API 金鑰
 
-## Getting started
+## 快速開始
 
 ```bash
 npm install
 OPENAI_API_KEY=sk-your-key npm start
 ```
 
-Once the server is running, open `http://localhost:3000` in a modern browser and
-press **Connect**. After the connections are ready, type a message and press
-**Send**. The dashboard will show GPT's replies for both transports and update
-the latency metrics in real time.
+啟動伺服器後，使用現代瀏覽器開啟 `http://localhost:3000` 並按下 **連線**。待兩種傳輸管道就緒後，輸入訊息並按下 **送出**。儀表板會即時顯示 GPT 的回覆與往返延遲，協助你掌握差異。
 
-## How it works
+## 運作方式
 
-- `server.js` serves the static assets in `public/`, proxies WebSocket traffic
-to `wss://api.openai.com/v1/realtime`, and exposes an endpoint that creates
-short-lived WebRTC session tokens via `POST /v1/realtime/sessions`.
-- `public/app.js` opens both transports, dispatches identical
-  `response.create` events when you submit a prompt, and records the latency from
-  send time to the model's `response.completed` event.
-- `public/styles.css` and `public/index.html` provide a dashboard that lets you
-  compare the two conversations and latency measurements side by side.
+- `server.js` 會提供 `public/` 內的靜態資源、將 WebSocket 流量代理至 `wss://api.openai.com/v1/realtime`，並透過 `POST /v1/realtime/sessions` 簽發短效 WebRTC 金鑰。
+- `public/app.js` 會同時開啟兩種傳輸，當你送出提示時發送相同的 `response.create` 事件，並記錄從送出到模型觸發 `response.completed` 的延遲。
+- `public/styles.css` 與 `public/index.html` 提供儀表板，讓你並排比較雙方的對話與延遲。
 
-Because both transports route to the same GPT session logic, the comparison
-highlights connection time, jitter, and round-trip performance differences
-between the protocols instead of app-specific processing.
+因為兩種傳輸皆連向同一組 GPT 會話邏輯，差異主要反映在連線時間、抖動與往返表現，而非應用程式本身的處理流程。
