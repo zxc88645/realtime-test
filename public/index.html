@@ -7,107 +7,131 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main>
-      <h1>GPT 即時延遲實驗室</h1>
-      <p>
-        按下 <strong>連線</strong> 以建立前往 OpenAI Realtime API 的 WebSocket 橋接與
-        WebRTC 資料通道。連線成功後輸入訊息並送出，就能同時透過 兩種傳輸方式與 GPT
-        對話，並比較從送出到完成回覆的往返延遲。
-      </p>
+    <div id="app">
+      <main>
+        <h1>GPT 即時延遲實驗室</h1>
+        <p>
+          按下 <strong>連線</strong> 以建立前往 OpenAI Realtime API 的 WebSocket 橋接與
+          WebRTC 資料通道。連線成功後輸入訊息並送出，就能同時透過 兩種傳輸方式與 GPT
+          對話，並比較從送出到完成回覆的往返延遲。
+        </p>
 
-      <p class="api-note">
-        範例伺服器需要在環境變數中設定 <code>OPENAI_API_KEY</code> 才能代理 前往
-        OpenAI。若缺少金鑰，兩種傳輸都會回報明確的錯誤。
-      </p>
+        <p class="api-note">
+          範例伺服器需要在環境變數中設定 <code>OPENAI_API_KEY</code> 才能代理 前往
+          OpenAI。若缺少金鑰，兩種傳輸都會回報明確的錯誤。
+        </p>
 
-      <button id="start">連線</button>
+        <button id="start" type="button" @click="onStartClick" :disabled="startDisabled">
+          {{ startLabel }}
+        </button>
 
-      <form id="message-form" class="message-form">
-        <label for="message">任一傳輸準備就緒後，傳訊給 GPT：</label>
-        <div class="message-controls">
-          <input
-            id="message"
-            name="message"
-            type="text"
-            placeholder="問 GPT 一個問題…"
-            autocomplete="off"
-            required
-            disabled
-          />
-          <button id="send" type="submit" disabled>送出</button>
-        </div>
-        <p class="hint">你的提示會同時送往兩種傳輸，以便比較回應內容與延遲。</p>
-      </form>
+        <form id="message-form" class="message-form" @submit.prevent="sendMessage">
+          <label for="message">任一傳輸準備就緒後，傳訊給 GPT：</label>
+          <div class="message-controls">
+            <input
+              id="message"
+              ref="messageInputRef"
+              name="message"
+              type="text"
+              placeholder="問 GPT 一個問題…"
+              autocomplete="off"
+              required
+              v-model="message"
+              :disabled="!canSend"
+            />
+            <button id="send" type="submit" :disabled="!canSend">送出</button>
+          </div>
+          <p class="hint">你的提示會同時送往兩種傳輸，以便比較回應內容與延遲。</p>
+        </form>
 
-      <section class="results" id="ws-result">
-        <h2>WebSocket</h2>
-        <dl>
-          <div>
-            <dt>狀態</dt>
-            <dd class="status">待命</dd>
+        <section class="results" id="ws-result">
+          <h2>WebSocket</h2>
+          <dl>
+            <div>
+              <dt>狀態</dt>
+              <dd class="status">{{ ws.status }}</dd>
+            </div>
+            <div>
+              <dt>最新延遲</dt>
+              <dd class="latest">{{ ws.latest }}</dd>
+            </div>
+            <div>
+              <dt>平均延遲</dt>
+              <dd class="average">{{ ws.average }}</dd>
+            </div>
+            <div>
+              <dt>樣本數</dt>
+              <dd class="samples">{{ ws.samples }}</dd>
+            </div>
+          </dl>
+          <div class="chat">
+            <h3>對話內容</h3>
+            <div class="messages" aria-live="polite">
+              <div
+                v-for="item in ws.messages"
+                :key="item.id"
+                :class="['message', item.role]"
+              >
+                <span class="message-role">{{ roleLabel(item.role) }}</span>
+                <span class="message-text">{{ item.text }}</span>
+              </div>
+            </div>
           </div>
-          <div>
-            <dt>最新延遲</dt>
-            <dd class="latest">–</dd>
-          </div>
-          <div>
-            <dt>平均延遲</dt>
-            <dd class="average">–</dd>
-          </div>
-          <div>
-            <dt>樣本數</dt>
-            <dd class="samples">0</dd>
-          </div>
-        </dl>
-        <div class="chat">
-          <h3>對話內容</h3>
-          <div class="messages" aria-live="polite"></div>
-        </div>
-      </section>
+        </section>
 
-      <section class="results" id="webrtc-result">
-        <h2>WebRTC 資料通道</h2>
-        <dl>
-          <div>
-            <dt>狀態</dt>
-            <dd class="status">待命</dd>
+        <section class="results" id="webrtc-result">
+          <h2>WebRTC 資料通道</h2>
+          <dl>
+            <div>
+              <dt>狀態</dt>
+              <dd class="status">{{ webrtc.status }}</dd>
+            </div>
+            <div>
+              <dt>最新延遲</dt>
+              <dd class="latest">{{ webrtc.latest }}</dd>
+            </div>
+            <div>
+              <dt>平均延遲</dt>
+              <dd class="average">{{ webrtc.average }}</dd>
+            </div>
+            <div>
+              <dt>樣本數</dt>
+              <dd class="samples">{{ webrtc.samples }}</dd>
+            </div>
+          </dl>
+          <div class="chat">
+            <h3>對話內容</h3>
+            <div class="messages" aria-live="polite">
+              <div
+                v-for="item in webrtc.messages"
+                :key="item.id"
+                :class="['message', item.role]"
+              >
+                <span class="message-role">{{ roleLabel(item.role) }}</span>
+                <span class="message-text">{{ item.text }}</span>
+              </div>
+            </div>
           </div>
-          <div>
-            <dt>最新延遲</dt>
-            <dd class="latest">–</dd>
-          </div>
-          <div>
-            <dt>平均延遲</dt>
-            <dd class="average">–</dd>
-          </div>
-          <div>
-            <dt>樣本數</dt>
-            <dd class="samples">0</dd>
-          </div>
-        </dl>
-        <div class="chat">
-          <h3>對話內容</h3>
-          <div class="messages" aria-live="polite"></div>
-        </div>
-      </section>
+        </section>
 
-      <section class="notes">
-        <h2>運作流程</h2>
-        <ol>
-          <li>
-            伺服器會將 WebSocket 連線代理至 OpenAI 的
-            <code>/v1/realtime</code> 端點，並能簽發瀏覽器使用的 WebRTC 短效金鑰。
-          </li>
-          <li>
-            當你送出訊息時，兩種傳輸都會發送相同的
-            <code>response.create</code> 事件，讓 GPT 收到一致的提示。
-          </li>
-          <li>
-            頁面會記錄每次請求的時間點，直到 GPT 宣告回覆完成為止，並即時 更新延遲儀表板。
-          </li>
-        </ol>
-      </section>
-    </main>
+        <section class="notes">
+          <h2>運作流程</h2>
+          <ol>
+            <li>
+              伺服器會將 WebSocket 連線代理至 OpenAI 的
+              <code>/v1/realtime</code> 端點，並能簽發瀏覽器使用的 WebRTC 短效金鑰。
+            </li>
+            <li>
+              當你送出訊息時，兩種傳輸都會發送相同的
+              <code>response.create</code> 事件，讓 GPT 收到一致的提示。
+            </li>
+            <li>
+              頁面會記錄每次請求的時間點，直到 GPT 宣告回覆完成為止，並即時更新延遲儀表板。
+            </li>
+          </ol>
+        </section>
+      </main>
+    </div>
     <script src="app.js" type="module"></script>
   </body>
 </html>
