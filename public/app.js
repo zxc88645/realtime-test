@@ -11,6 +11,7 @@ const REALTIME_BASE_URL = 'https://api.openai.com/v1/realtime';
 const REALTIME_WS_PATH = '/openai/agents/realtime/ws';
 const REALTIME_EPHEMERAL_PATH = '/openai/agents/realtime/ephemeral-token';
 const REALTIME_VOICE = 'verse';
+const AUDIO_SAMPLE_RATE = 24000;
 
 const THEME_STORAGE_KEY = 'realtime-preferred-theme';
 const LANGUAGE_STORAGE_KEY = 'realtime-preferred-language';
@@ -64,7 +65,7 @@ const MODE_OPTIONS = [
   {
     id: 'ws',
     label: MODE_LABELS.ws,
-    description: '透過伺服器橋接至 OpenAI Realtime API，適合純文字對話。',
+    description: '透過伺服器橋接至 OpenAI Realtime API，支援語音與文字即時互動。',
   },
   {
     id: 'webrtc',
@@ -113,6 +114,14 @@ function createTransportContext(id) {
     remoteStream: null,
     audioElement: null,
     audioPlayer: null,
+    mediaRecorder: null,
+    microphoneStream: null,
+    audioEncoder: null,
+    isRecording: false,
+    startRecording: undefined,
+    stopRecording: undefined,
+    cancelRecording: undefined,
+    configureSession: undefined,
   });
 }
 
@@ -204,6 +213,116 @@ function extractCompletedText(event, fallback = '') {
   return fallback;
 }
 
+function arrayBufferToBase64(buffer) {
+  if (!buffer) {
+    return '';
+  }
+  const bytes = new Uint8Array(buffer);
+  if (!bytes.byteLength) {
+    return '';
+  }
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const slice = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...slice);
+  }
+  return btoa(binary);
+}
+
+function createPcm16Encoder({ sampleRate = AUDIO_SAMPLE_RATE } = {}) {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    throw new Error('瀏覽器不支援音訊編碼功能');
+  }
+
+  let audioContext = null;
+
+  const ensureContext = async () => {
+    if (!audioContext) {
+      audioContext = new AudioContextClass({ sampleRate });
+    }
+    if (audioContext.state === 'suspended') {
+      try {
+        await audioContext.resume();
+      } catch (error) {
+        console.warn('恢復 AudioContext 失敗', error);
+      }
+    }
+    return audioContext;
+  };
+
+  const resampleToTarget = async (buffer) => {
+    if (!buffer) {
+      return null;
+    }
+    if (buffer.numberOfChannels === 1 && buffer.sampleRate === sampleRate) {
+      return buffer;
+    }
+    const duration = buffer.duration;
+    if (!duration) {
+      return buffer;
+    }
+    const frameCount = Math.ceil(duration * sampleRate);
+    const offlineContext = new OfflineAudioContext(1, frameCount, sampleRate);
+    const source = offlineContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(offlineContext.destination);
+    source.start(0);
+    try {
+      return await offlineContext.startRendering();
+    } catch (error) {
+      console.warn('重新取樣音訊時發生錯誤', error);
+      return buffer;
+    }
+  };
+
+  return {
+    async encode(blob) {
+      if (!blob || !blob.size) {
+        return null;
+      }
+      const context = await ensureContext();
+      const arrayBuffer = await blob.arrayBuffer();
+      let decoded;
+      try {
+        decoded = await context.decodeAudioData(arrayBuffer.slice(0));
+      } catch (error) {
+        console.warn('解碼音訊片段時發生錯誤', error);
+        return null;
+      }
+      if (!decoded || !decoded.length) {
+        return null;
+      }
+      const resampled = await resampleToTarget(decoded);
+      if (!resampled || !resampled.length) {
+        return null;
+      }
+      const channelData = resampled.getChannelData(0);
+      if (!channelData || !channelData.length) {
+        return null;
+      }
+      const pcmBuffer = new ArrayBuffer(channelData.length * 2);
+      const view = new DataView(pcmBuffer);
+      for (let i = 0; i < channelData.length; i += 1) {
+        const sample = Math.max(-1, Math.min(1, channelData[i]));
+        view.setInt16(i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      }
+      return arrayBufferToBase64(pcmBuffer);
+    },
+    async close() {
+      if (audioContext) {
+        try {
+          await audioContext.close();
+        } catch (error) {
+          console.warn('關閉音訊編碼器時發生錯誤', error);
+        }
+        audioContext = null;
+      }
+    },
+  };
+}
+
 function ensureResponseEntry(transport, event) {
   const response = event?.response;
   if (!response?.id) {
@@ -284,6 +403,9 @@ function handleRealtimeEvent(transport, event) {
       transport.pendingMessages.delete(entry.clientMessageId);
     }
     transport.responsesById.delete(event.response.id);
+    if (transport.id === 'ws' && transport.connection) {
+      transport.status = '已連線（語音就緒）';
+    }
   } else if (event.type === 'response.error') {
     const message = event.error?.message || '模型無法產生回應。';
     appendMessage(transport, 'error', message);
@@ -355,6 +477,28 @@ function buildResponseCreateEvent(text, clientMessageId, options = {}) {
   return {
     type: 'response.create',
     response,
+  };
+}
+
+function buildAudioResponseCreateEvent(clientMessageId, options = {}) {
+  const { language } = options;
+  const instructions = ['請根據使用者的語音輸入直接回覆，並同步輸出語音與文字逐字稿。'];
+  if (language?.prompt) {
+    instructions.push(language.prompt);
+  }
+  return {
+    type: 'response.create',
+    response: {
+      metadata: {
+        client_message_id: clientMessageId,
+      },
+      modalities: ['audio', 'text'],
+      instructions: instructions.join('\n'),
+      audio: {
+        voice: REALTIME_VOICE,
+        format: 'pcm16',
+      },
+    },
   };
 }
 
@@ -540,6 +684,13 @@ function stopWebSocketTransport(transport) {
   }
   const hadConnection = !!transport.connection;
   transport.manualStop = hadConnection;
+  if (typeof transport.cancelRecording === 'function') {
+    try {
+      transport.cancelRecording({ silent: true });
+    } catch (error) {
+      console.warn('取消語音錄製時發生錯誤', error);
+    }
+  }
   if (hadConnection) {
     try {
       transport.connection.close();
@@ -557,6 +708,26 @@ function stopWebSocketTransport(transport) {
       console.warn('重設即時音訊播放器失敗', error);
     });
   }
+  if (transport.microphoneStream) {
+    try {
+      transport.microphoneStream.getTracks().forEach((track) => track.stop());
+    } catch (error) {
+      console.warn('停止麥克風串流時發生錯誤', error);
+    }
+  }
+  transport.mediaRecorder = null;
+  transport.microphoneStream = null;
+  transport.isRecording = false;
+  if (transport.audioEncoder?.close) {
+    Promise.resolve(transport.audioEncoder.close()).catch((error) => {
+      console.warn('關閉音訊編碼器時發生錯誤', error);
+    });
+  }
+  transport.audioEncoder = null;
+  transport.startRecording = undefined;
+  transport.stopRecording = undefined;
+  transport.cancelRecording = undefined;
+  transport.configureSession = undefined;
   transport.status = '待命';
   if (!hadConnection) {
     transport.manualStop = false;
@@ -645,11 +816,31 @@ function startWebSocketTransport(transport, resolveLanguage) {
       console.warn('關閉既有 WebSocket 連線時發生錯誤', error);
     }
   }
+  if (typeof transport.cancelRecording === 'function') {
+    try {
+      transport.cancelRecording({ silent: true });
+    } catch (error) {
+      console.warn('取消既有語音錄製時發生錯誤', error);
+    }
+  }
+  if (transport.audioEncoder?.close) {
+    Promise.resolve(transport.audioEncoder.close()).catch((error) => {
+      console.warn('關閉音訊編碼器時發生錯誤', error);
+    });
+  }
+  transport.audioEncoder = null;
   transport.connection = null;
   transport.send = undefined;
   transport.isReady = false;
   transport.pendingMessages.clear();
   transport.responsesById.clear();
+  transport.startRecording = undefined;
+  transport.stopRecording = undefined;
+  transport.cancelRecording = undefined;
+  transport.configureSession = undefined;
+  transport.mediaRecorder = null;
+  transport.microphoneStream = null;
+  transport.isRecording = false;
   if (transport.audioPlayer) {
     transport.audioPlayer.reset().catch((error) => {
       console.warn('重設即時音訊播放器失敗', error);
@@ -664,12 +855,303 @@ function startWebSocketTransport(transport, resolveLanguage) {
 
   const queue = [];
 
+  const sendEvent = (event) => {
+    const payload = JSON.stringify(event);
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(payload);
+      return true;
+    }
+    if (socket.readyState === WebSocket.CONNECTING) {
+      queue.push(payload);
+      return true;
+    }
+    return false;
+  };
+
+  let encoder = null;
+  let recorder = null;
+  let microphoneStream = null;
+  let encodingQueue = Promise.resolve();
+  let shouldSubmitRecording = true;
+  let silentCancel = false;
+  let hasAudioData = false;
+  let pendingStopResolver = null;
+  let encodingFailed = false;
+
+  const ensureEncoder = async () => {
+    if (!encoder) {
+      encoder = createPcm16Encoder({ sampleRate: AUDIO_SAMPLE_RATE });
+      transport.audioEncoder = encoder;
+    }
+    return encoder;
+  };
+
+  const releaseEncoder = async () => {
+    if (encoder?.close) {
+      try {
+        await encoder.close();
+      } catch (error) {
+        console.warn('關閉音訊編碼器時發生錯誤', error);
+      }
+    }
+    encoder = null;
+    transport.audioEncoder = null;
+  };
+
+  const stopTracks = (stream) => {
+    if (!stream) {
+      return;
+    }
+    try {
+      stream.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch (error) {
+          console.warn('停止音訊軌時發生錯誤', error);
+        }
+      });
+    } catch (error) {
+      console.warn('釋放音訊串流時發生錯誤', error);
+    }
+  };
+
+  const resetRecordingState = () => {
+    stopTracks(microphoneStream);
+    microphoneStream = null;
+    transport.microphoneStream = null;
+    recorder = null;
+    transport.mediaRecorder = null;
+    transport.isRecording = false;
+    shouldSubmitRecording = true;
+    silentCancel = false;
+    hasAudioData = false;
+    encodingFailed = false;
+    pendingStopResolver = null;
+    encodingQueue = Promise.resolve();
+  };
+
+  const finalizeRecording = async () => {
+    transport.isRecording = false;
+    await encodingQueue.catch(() => {});
+    encodingQueue = Promise.resolve();
+
+    if (!shouldSubmitRecording || !hasAudioData) {
+      if (hasAudioData) {
+        sendEvent({ type: 'input_audio_buffer.clear' });
+      }
+      if (!silentCancel) {
+        if (encodingFailed) {
+          transport.status = '已連線（語音就緒）';
+        } else if (!shouldSubmitRecording) {
+          transport.status = '已連線（語音就緒）';
+        } else if (!hasAudioData) {
+          appendMessage(transport, 'error', '本次語音訊息沒有偵測到聲音，已取消送出。');
+          transport.status = '已連線（語音就緒）';
+        }
+      }
+      resetRecordingState();
+      return;
+    }
+
+    transport.status = '等待語音回覆…';
+    sendEvent({ type: 'input_audio_buffer.commit' });
+    const clientMessageId = crypto.randomUUID();
+    const language = typeof resolveLanguage === 'function' ? resolveLanguage() : null;
+    const responseEvent = buildAudioResponseCreateEvent(clientMessageId, { language });
+    sendEvent(responseEvent);
+    transport.pendingMessages.set(clientMessageId, {
+      start: performance.now(),
+    });
+    appendMessage(transport, 'user', '（語音訊息）');
+    resetRecordingState();
+  };
+
+  const configureSession = (language) => {
+    const instructions = ['你是一位即時語音助理，會以語音與文字同步回覆使用者。'];
+    if (language?.prompt) {
+      instructions.push(language.prompt);
+    }
+    const sessionUpdate = {
+      type: 'session.update',
+      session: {
+        input_audio_format: 'pcm16',
+        output_audio_format: 'pcm16',
+        input_audio_transcription: { model: 'whisper-1' },
+        modalities: ['audio', 'text'],
+        voice: REALTIME_VOICE,
+        instructions: instructions.join('\n'),
+      },
+    };
+    if (!REALTIME_VOICE) {
+      delete sessionUpdate.session.voice;
+    }
+    sendEvent(sessionUpdate);
+  };
+
+  const startRecording = async () => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      appendMessage(transport, 'error', 'WebSocket 尚未連線，無法開始錄音。');
+      return false;
+    }
+    if (transport.isRecording) {
+      return true;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      appendMessage(transport, 'error', '瀏覽器不支援麥克風擷取功能。');
+      return false;
+    }
+
+    transport.status = '等待麥克風權限…';
+    try {
+      microphoneStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: AUDIO_SAMPLE_RATE,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+    } catch (error) {
+      console.error('取得麥克風權限失敗', error);
+      appendMessage(transport, 'error', '無法取得麥克風權限，請確認瀏覽器設定。');
+      transport.status = '已連線（語音就緒）';
+      return false;
+    }
+
+    transport.microphoneStream = microphoneStream;
+
+    try {
+      recorder = new MediaRecorder(microphoneStream, { mimeType: 'audio/webm' });
+    } catch (error) {
+      console.error('建立 MediaRecorder 失敗', error);
+      appendMessage(transport, 'error', '瀏覽器不支援目前的錄音設定。');
+      transport.status = '已連線（語音就緒）';
+      stopTracks(microphoneStream);
+      microphoneStream = null;
+      transport.microphoneStream = null;
+      return false;
+    }
+
+    encodingQueue = Promise.resolve();
+    shouldSubmitRecording = true;
+    silentCancel = false;
+    hasAudioData = false;
+    encodingFailed = false;
+    transport.mediaRecorder = recorder;
+    transport.isRecording = true;
+
+    recorder.addEventListener('dataavailable', (event) => {
+      if (!event.data || !event.data.size) {
+        return;
+      }
+      encodingQueue = encodingQueue
+        .then(async () => {
+          const encoderInstance = await ensureEncoder();
+          const base64 = await encoderInstance.encode(event.data);
+          if (base64) {
+            hasAudioData = true;
+            sendEvent({ type: 'input_audio_buffer.append', audio: base64 });
+          }
+        })
+        .catch((error) => {
+          console.error('處理音訊片段時發生錯誤', error);
+          if (!encodingFailed && !silentCancel) {
+            appendMessage(transport, 'error', '編碼音訊片段失敗，已取消此次語音訊息。');
+          }
+          encodingFailed = true;
+          shouldSubmitRecording = false;
+          if (recorder && recorder.state !== 'inactive') {
+            try {
+              recorder.stop();
+            } catch (stopError) {
+              console.warn('停止錄音時發生錯誤', stopError);
+            }
+          }
+        });
+    });
+
+    recorder.addEventListener('error', (event) => {
+      console.error('MediaRecorder 錄音失敗', event.error || event);
+      if (!encodingFailed && !silentCancel) {
+        appendMessage(transport, 'error', '錄音發生錯誤，已取消此次語音訊息。');
+      }
+      encodingFailed = true;
+      shouldSubmitRecording = false;
+      if (recorder && recorder.state !== 'inactive') {
+        try {
+          recorder.stop();
+        } catch (stopError) {
+          console.warn('停止錄音時發生錯誤', stopError);
+        }
+      }
+    });
+
+    const handleRecorderStop = () => {
+      const finalize = finalizeRecording().catch((error) => {
+        console.error('處理語音錄製結果時發生錯誤', error);
+      });
+      const resolver = pendingStopResolver;
+      pendingStopResolver = null;
+      if (resolver) {
+        finalize.finally(resolver);
+      }
+    };
+
+    recorder.addEventListener('stop', handleRecorderStop, { once: true });
+
+    try {
+      recorder.start(250);
+    } catch (error) {
+      console.error('啟動語音錄製失敗', error);
+      appendMessage(transport, 'error', '啟動語音錄製失敗，請稍後再試。');
+      transport.status = '已連線（語音就緒）';
+      resetRecordingState();
+      return false;
+    }
+
+    transport.status = '錄音中…';
+    return true;
+  };
+
+  const stopRecording = async ({ shouldSubmit = true, silent = false } = {}) => {
+    shouldSubmitRecording = shouldSubmit;
+    silentCancel = silent;
+    if (!recorder) {
+      if (!silent) {
+        transport.status = '已連線（語音就緒）';
+      }
+      return Promise.resolve();
+    }
+    if (recorder.state !== 'inactive') {
+      return new Promise((resolve) => {
+        pendingStopResolver = resolve;
+        try {
+          recorder.stop();
+        } catch (error) {
+          console.warn('停止錄音時發生錯誤', error);
+          pendingStopResolver = null;
+          resolve();
+        }
+      });
+    }
+    await finalizeRecording();
+    return Promise.resolve();
+  };
+
+  transport.startRecording = startRecording;
+  transport.stopRecording = () => stopRecording({ shouldSubmit: true });
+  transport.cancelRecording = (options = {}) =>
+    stopRecording({ shouldSubmit: false, silent: options?.silent ?? false });
+  transport.configureSession = configureSession;
+
   socket.addEventListener('open', () => {
     transport.isReady = true;
-    transport.status = '已連線（文字互動）';
+    transport.status = '已連線（語音就緒）';
     while (queue.length && socket.readyState === WebSocket.OPEN) {
       socket.send(queue.shift());
     }
+    configureSession(typeof resolveLanguage === 'function' ? resolveLanguage() : null);
   });
 
   socket.addEventListener('message', async (event) => {
@@ -683,6 +1165,8 @@ function startWebSocketTransport(transport, resolveLanguage) {
 
   socket.addEventListener('close', () => {
     transport.isReady = false;
+    stopRecording({ shouldSubmit: false, silent: true }).catch(() => {});
+    releaseEncoder();
     transport.connection = null;
     transport.send = undefined;
     transport.pendingMessages.clear();
@@ -692,6 +1176,13 @@ function startWebSocketTransport(transport, resolveLanguage) {
         console.warn('重設即時音訊播放器失敗', error);
       });
     }
+    transport.startRecording = undefined;
+    transport.stopRecording = undefined;
+    transport.cancelRecording = undefined;
+    transport.configureSession = undefined;
+    transport.mediaRecorder = null;
+    transport.microphoneStream = null;
+    transport.isRecording = false;
     transport.status = transport.manualStop ? '待命' : '已關閉';
     transport.manualStop = false;
   });
@@ -711,23 +1202,18 @@ function startWebSocketTransport(transport, resolveLanguage) {
     }
     const clientMessageId = crypto.randomUUID();
     const language = typeof resolveLanguage === 'function' ? resolveLanguage() : null;
-    const payload = JSON.stringify(
-      buildResponseCreateEvent(message, clientMessageId, {
-        includeAudio: false,
-        language,
-      })
-    );
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.send(payload);
-    } else if (socket.readyState === WebSocket.CONNECTING) {
-      queue.push(payload);
-    } else {
+    const event = buildResponseCreateEvent(message, clientMessageId, {
+      includeAudio: true,
+      language,
+    });
+    if (!sendEvent(event)) {
       return false;
     }
     transport.pendingMessages.set(clientMessageId, {
       start: performance.now(),
     });
     appendMessage(transport, 'user', message);
+    transport.status = '等待語音回覆…';
     return true;
   };
 }
@@ -989,6 +1475,18 @@ const app = createApp({
         } catch (error) {
           console.warn('儲存偏好語言時發生錯誤', error);
         }
+        const language = languageMap.get(value) ?? languageOptions[0];
+        if (
+          ws.configureSession &&
+          ws.connection &&
+          ws.connection.readyState === WebSocket.OPEN
+        ) {
+          try {
+            ws.configureSession(language);
+          } catch (error) {
+            console.warn('更新語音會話設定時發生錯誤', error);
+          }
+        }
       },
       { flush: 'post' }
     );
@@ -1125,6 +1623,36 @@ const app = createApp({
       }
     };
 
+    const startVoiceRecording = async () => {
+      if (selectedMode.value !== 'ws') {
+        return;
+      }
+      if (typeof ws.startRecording !== 'function') {
+        appendMessage(ws, 'error', '請先建立 WebSocket 連線再開始錄音。');
+        return;
+      }
+      try {
+        await ws.startRecording();
+      } catch (error) {
+        console.error('啟動語音錄製時發生錯誤', error);
+        appendMessage(ws, 'error', '啟動語音錄製時發生錯誤，請稍後再試。');
+      }
+    };
+
+    const stopVoiceRecording = async () => {
+      if (selectedMode.value !== 'ws') {
+        return;
+      }
+      if (typeof ws.stopRecording === 'function') {
+        try {
+          await ws.stopRecording();
+        } catch (error) {
+          console.error('停止語音錄製時發生錯誤', error);
+          appendMessage(ws, 'error', '停止錄音時發生錯誤，請重新連線。');
+        }
+      }
+    };
+
     watch(selectedMode, (next, previous) => {
       if (previous === next) {
         return;
@@ -1153,6 +1681,8 @@ const app = createApp({
       canSend,
       onStartClick,
       sendMessage,
+      startVoiceRecording,
+      stopVoiceRecording,
       roleLabel,
       messageContainerClass,
       messageBubbleClass,

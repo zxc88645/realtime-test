@@ -110,7 +110,7 @@
               會保持唯一通道；重新連線時會清除尚未完成的延遲樣本並重新建立管道。
             </p>
             <p class="warning-text">
-              WebSocket 模式目前僅支援文字互動，如需即時語音請改用 WebRTC。
+              WebSocket 模式可直接錄音並取得語音回覆，若需要瀏覽器直連可改用 WebRTC。
             </p>
           </section>
 
@@ -120,8 +120,8 @@
               <li class="tip-item">
                 <span class="tip-marker" aria-hidden="true"></span>
                 <span
-                  >WebRTC
-                  需要麥克風權限才能傳輸即時語音；若拒絕權限，系統會自動改為僅接收。</span
+                  >WebSocket 與 WebRTC
+                  都需要麥克風權限才能傳輸語音；若拒絕權限，系統會自動改為僅接收。</span
                 >
               </li>
               <li class="tip-item">
@@ -218,6 +218,30 @@
                 訊息只會送往當前選定的模式，並會記錄自送出至回覆完成的往返延遲。
               </p>
             </form>
+
+            <div class="voice-controls" v-if="selectedMode === 'ws'">
+              <div class="voice-controls__buttons">
+                <button
+                  type="button"
+                  class="secondary-button"
+                  @click="startVoiceRecording"
+                  :disabled="!ws.isReady || ws.isRecording"
+                >
+                  {{ ws.isRecording ? '錄音中…' : '開始錄音' }}
+                </button>
+                <button
+                  type="button"
+                  class="danger-button"
+                  @click="stopVoiceRecording"
+                  :disabled="!ws.isRecording"
+                >
+                  停止錄音並送出
+                </button>
+              </div>
+              <p class="helper-text">
+                錄音期間會持續串流至伺服器；按下停止後會自動將音訊送交 GPT 產生語音回覆。
+              </p>
+            </div>
           </section>
 
           <section class="info-panel">

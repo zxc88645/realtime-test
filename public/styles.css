@@ -220,6 +220,14 @@ code {
   outline: none;
 }
 
+.ghost-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: transparent;
+  color: var(--text-tertiary);
+  border-color: transparent;
+}
+
 .callout {
   border-radius: 18px;
   border: 1px solid var(--panel-border);
@@ -422,6 +430,78 @@ code {
   color: var(--text-tertiary);
   cursor: not-allowed;
   box-shadow: none;
+}
+
+.secondary-button {
+  border-radius: 14px;
+  border: 1px solid var(--accent);
+  background: var(--bg-subtle);
+  color: var(--accent-strong);
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.85rem 1.1rem;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.secondary-button:hover,
+.secondary-button:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.secondary-button:disabled {
+  border-color: var(--panel-border);
+  color: var(--text-tertiary);
+  background: var(--bg-muted);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.danger-button {
+  border-radius: 14px;
+  border: 1px solid #cf222e;
+  background: #cf222e;
+  color: #ffffff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.85rem 1.1rem;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+  box-shadow: 0 4px 12px rgba(207, 34, 46, 0.25);
+}
+
+.danger-button:hover,
+.danger-button:focus-visible {
+  background: #b31826;
+  outline: none;
+}
+
+.danger-button:disabled {
+  background: rgba(207, 34, 46, 0.4);
+  border-color: rgba(207, 34, 46, 0.4);
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.voice-controls {
+  margin-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.voice-controls__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .tip-list {
