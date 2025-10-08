@@ -246,26 +246,7 @@ function createRealtimeWebSocketHandler(options) {
         addUpstreamListener(upstreamSocket, 'close', handleUpstreamClose);
         addUpstreamListener(upstreamSocket, 'error', handleUpstreamError);
 
-        try {
-          const sessionUpdate = {
-            type: 'session.update',
-            session: {
-              input_audio_format: 'pcm16',
-              output_audio_format: 'pcm16',
-              input_audio_transcription: { model: 'whisper-1' },
-              modalities: ['audio', 'text'],
-              voice: realtimeVoice,
-              instructions:
-                '你是一位即時語音助理，請以親切的語氣提供語音與文字回覆，預設使用繁體中文。',
-            },
-          };
-          if (!realtimeVoice) {
-            delete sessionUpdate.session.voice;
-          }
-          upstreamTransport.sendEvent(sessionUpdate);
-        } catch (error) {
-          console.warn('初始化即時語音會話時發生錯誤', error);
-        }
+
 
         if (isSocketOpen(clientSocket)) {
           try {

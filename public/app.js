@@ -356,18 +356,13 @@ function handleRealtimeEvent(transport, event) {
     return;
   }
 
-  if (event.type === 'server.status') {
-    if (typeof event.status === 'string') {
-      transport.status = event.status;
-    }
+  if (event.type === 'session.created') {
+    transport.status = '已連線（語音就緒）';
     return;
   }
 
-  if (
-    event.type === 'response.output_audio.delta' ||
-    event.type === 'response.audio.delta'
-  ) {
-    const audioChunk = extractAudioDelta(event);
+  if (event.type === 'response.audio.delta') {
+    const audioChunk = event.delta;
     if (audioChunk) {
       try {
         const player = ensureAudioPlayer(transport);
@@ -378,41 +373,39 @@ function handleRealtimeEvent(transport, event) {
         console.warn('播放即時音訊失敗', error);
       }
     }
-  }
-
-  if (event.type === 'response.output_audio.done') {
     return;
   }
 
-  const entry = ensureResponseEntry(transport, event);
-  if (!entry) {
-    return;
-  }
-
-  if (event.type === 'response.delta' || event.type === 'response.output_text.delta') {
-    const fragment = extractDeltaText(event);
-    if (fragment) {
-      entry.message.text = `${entry.message.text || ''}${fragment}`;
+  if (event.type === 'response.text.delta') {
+    const entry = ensureResponseEntry(transport, event);
+    if (entry && event.delta) {
+      entry.message.text = `${entry.message.text || ''}${event.delta}`;
     }
-  } else if (event.type === 'response.completed') {
-    const finalText = extractCompletedText(event, entry.message.text);
-    entry.message.text = finalText;
-    if (entry.clientMessageId && transport.pendingMessages.has(entry.clientMessageId)) {
+    return;
+  }
+
+  if (event.type === 'response.audio_transcript.delta') {
+    const entry = ensureResponseEntry(transport, event);
+    if (entry && event.delta) {
+      entry.message.text = `${entry.message.text || ''}${event.delta}`;
+    }
+    return;
+  }
+
+  if (event.type === 'response.done') {
+    const entry = ensureResponseEntry(transport, event);
+    if (entry?.clientMessageId && transport.pendingMessages.has(entry.clientMessageId)) {
       const started = transport.pendingMessages.get(entry.clientMessageId).start;
       recordLatency(transport, performance.now() - started);
       transport.pendingMessages.delete(entry.clientMessageId);
     }
-    transport.responsesById.delete(event.response.id);
+    if (event.response?.id) {
+      transport.responsesById.delete(event.response.id);
+    }
     if (transport.id === 'ws' && transport.connection) {
       transport.status = '已連線（語音就緒）';
     }
-  } else if (event.type === 'response.error') {
-    const message = event.error?.message || '模型無法產生回應。';
-    appendMessage(transport, 'error', message);
-    if (entry.clientMessageId && transport.pendingMessages.has(entry.clientMessageId)) {
-      transport.pendingMessages.delete(entry.clientMessageId);
-    }
-    transport.responsesById.delete(event.response.id);
+    return;
   }
 }
 
@@ -464,17 +457,11 @@ function buildResponseCreateEvent(text, clientMessageId, options = {}) {
   const response = {
     metadata: {
       client_message_id: clientMessageId,
-    },
-    modalities: includeAudio ? ['text', 'audio'] : ['text'],
+    },    
     input,
   };
 
-  if (includeAudio) {
-    response.audio = {
-      voice: REALTIME_VOICE,
-      format: 'pcm16',
-    };
-  }
+
 
   return {
     type: 'response.create',
@@ -484,10 +471,19 @@ function buildResponseCreateEvent(text, clientMessageId, options = {}) {
 
 function buildAudioResponseCreateEvent(clientMessageId, options = {}) {
   const { language } = options;
-  const instructions = ['請根據使用者的語音輸入直接回覆，並同步輸出語音與文字逐字稿。'];
+  const input = [];
+  
   if (language?.prompt) {
-    instructions.push(language.prompt);
+    input.push({
+      type: 'message',
+      role: 'system',
+      content: [{
+        type: 'input_text',
+        text: language.prompt,
+      }],
+    });
   }
+  
   return {
     type: 'response.create',
     response: {
@@ -495,11 +491,7 @@ function buildAudioResponseCreateEvent(clientMessageId, options = {}) {
         client_message_id: clientMessageId,
       },
       modalities: ['audio', 'text'],
-      instructions: instructions.join('\n'),
-      audio: {
-        voice: REALTIME_VOICE,
-        format: 'pcm16',
-      },
+      input,
     },
   };
 }
@@ -610,75 +602,7 @@ function ensureAudioPlayer(transport) {
   return transport.audioPlayer;
 }
 
-function extractAudioDelta(event) {
-  if (!event || typeof event !== 'object') {
-    return null;
-  }
-  const candidates = [];
-  if (event.delta) {
-    if (typeof event.delta === 'string') {
-      candidates.push(event.delta);
-    } else if (typeof event.delta.audio === 'string') {
-      candidates.push(event.delta.audio);
-    } else if (typeof event.delta.data === 'string') {
-      candidates.push(event.delta.data);
-    } else if (Array.isArray(event.delta)) {
-      for (const deltaItem of event.delta) {
-        if (typeof deltaItem === 'string') {
-          candidates.push(deltaItem);
-        } else if (typeof deltaItem?.audio === 'string') {
-          candidates.push(deltaItem.audio);
-        } else if (typeof deltaItem?.data === 'string') {
-          candidates.push(deltaItem.data);
-        }
-      }
-    }
-  }
-  if (event.audio) {
-    if (typeof event.audio === 'string') {
-      candidates.push(event.audio);
-    } else if (typeof event.audio.data === 'string') {
-      candidates.push(event.audio.data);
-    }
-  }
-  const itemContent = event?.item?.content;
-  if (Array.isArray(itemContent)) {
-    for (const item of itemContent) {
-      if (typeof item === 'string') {
-        continue;
-      }
-      if (item?.type === 'output_audio') {
-        if (typeof item?.audio === 'string') {
-          candidates.push(item.audio);
-        } else if (typeof item?.audio?.data === 'string') {
-          candidates.push(item.audio.data);
-        } else if (typeof item?.data === 'string') {
-          candidates.push(item.data);
-        }
-      }
-      if (item?.delta) {
-        if (typeof item.delta === 'string') {
-          candidates.push(item.delta);
-        } else if (typeof item.delta?.audio === 'string') {
-          candidates.push(item.delta.audio);
-        } else if (typeof item.delta?.data === 'string') {
-          candidates.push(item.delta.data);
-        } else if (Array.isArray(item.delta)) {
-          for (const nestedDelta of item.delta) {
-            if (typeof nestedDelta === 'string') {
-              candidates.push(nestedDelta);
-            } else if (typeof nestedDelta?.audio === 'string') {
-              candidates.push(nestedDelta.audio);
-            } else if (typeof nestedDelta?.data === 'string') {
-              candidates.push(nestedDelta.data);
-            }
-          }
-        }
-      }
-    }
-  }
-  return candidates.find((value) => typeof value === 'string' && value.length);
-}
+
 
 function stopWebSocketTransport(transport) {
   if (!transport) {
@@ -976,11 +900,7 @@ function startWebSocketTransport(transport, resolveLanguage) {
     const sessionUpdate = {
       type: 'session.update',
       session: {
-        input_audio_format: 'pcm16',
-        output_audio_format: 'pcm16',
-        input_audio_transcription: { model: 'whisper-1' },
-        modalities: ['audio', 'text'],
-        voice: REALTIME_VOICE,
+        type: 'realtime',
         instructions: instructions.join('\n'),
       },
     };
@@ -1431,7 +1351,7 @@ async function startWebRTCTransport(transport, resolveLanguage) {
     channel.send(
       JSON.stringify(
         buildResponseCreateEvent(message, clientMessageId, {
-          includeAudio: false,
+          includeAudio: true,
           language,
         })
       )

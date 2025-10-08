@@ -6,7 +6,7 @@ const {
   OPENAI_REALTIME_BASE_URL,
   DEFAULT_PUBLIC_DIRECTORY,
 } = require('./constants');
-const { OpenAI } = require('@openai/agents');
+
 
 function ensureFetch(fetchImpl) {
   if (typeof fetchImpl !== 'function') {
@@ -23,12 +23,8 @@ function ensureOpenAIClientFactory(createOpenAIClient) {
 }
 
 function resolveOpenAIBaseUrl(realtimeBaseUrl) {
-  try {
-    const baseUrl = new URL('./', `${realtimeBaseUrl.replace(/\/$/, '')}/`);
-    return baseUrl.toString().replace(/\/$/, '');
-  } catch (_error) {
-    return undefined;
-  }
+  // OpenAI 客戶端需要基礎 API URL，不包含 /realtime 路徑
+  return 'https://api.openai.com/v1';
 }
 
 function buildConfig(options = {}) {
@@ -45,11 +41,23 @@ function buildConfig(options = {}) {
 
   const openAIClientFactory =
     createOpenAIClient ??
-    (() =>
-      new OpenAI({
-        apiKey,
-        baseURL: resolveOpenAIBaseUrl(realtimeBaseUrl),
-      }));
+    (() => ({
+      createSession: async (config) => {
+        const response = await fetchImpl('https://api.openai.com/v1/realtime/sessions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(config),
+        });
+        if (!response.ok) {
+          const error = await response.json();
+          throw { status: response.status, error };
+        }
+        return await response.json();
+      },
+    }));
 
   return {
     port,

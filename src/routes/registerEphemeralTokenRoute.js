@@ -19,7 +19,7 @@ function registerEphemeralTokenRoute(app, dependencies) {
     }
 
     try {
-      const session = await client.realtime.clientSecrets.create({
+      const session = await client.createSession({
         model: realtimeModel,
         voice: realtimeVoice,
       });
