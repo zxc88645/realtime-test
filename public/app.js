@@ -439,6 +439,7 @@ function buildResponseCreateEvent(text, clientMessageId, options = {}) {
 
   if (language?.prompt) {
     input.push({
+      type: 'message',
       role: 'system',
       content: [
         {
@@ -450,6 +451,7 @@ function buildResponseCreateEvent(text, clientMessageId, options = {}) {
   }
 
   input.push({
+    type: 'message',
     role: 'user',
     content: [
       {
