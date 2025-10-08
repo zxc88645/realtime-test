@@ -73,8 +73,11 @@
                 :class="['message', item.role]"
               >
                 <span class="message-role">{{ roleLabel(item.role) }}</span>
-                <span class="message-text">{{ item.text }}</span>
+                <div class="message-bubble">
+                  <p class="message-text">{{ item.text || '（等待回覆…）' }}</p>
+                </div>
               </div>
+              <p v-if="!ws.messages.length" class="messages-empty">尚未傳送任何訊息。</p>
             </div>
           </div>
         </section>
@@ -108,8 +111,11 @@
                 :class="['message', item.role]"
               >
                 <span class="message-role">{{ roleLabel(item.role) }}</span>
-                <span class="message-text">{{ item.text }}</span>
+                <div class="message-bubble">
+                  <p class="message-text">{{ item.text || '（等待回覆…）' }}</p>
+                </div>
               </div>
+              <p v-if="!webrtc.messages.length" class="messages-empty">尚未傳送任何訊息。</p>
             </div>
           </div>
         </section>
