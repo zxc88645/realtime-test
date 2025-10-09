@@ -54,6 +54,8 @@ export function stopWebRTCTransport(transport) {
   transport.isReady = false;
   transport.pendingMessages.clear();
   transport.responsesById.clear();
+  transport.conversationItemsById.clear();
+  transport.pendingTranscriptionMessages.length = 0;
   transport.localStream = null;
   transport.remoteStream = null;
   transport.status = '待命';
@@ -95,6 +97,8 @@ export async function startWebRTCTransport(transport) {
   transport.isReady = false;
   transport.pendingMessages.clear();
   transport.responsesById.clear();
+  transport.conversationItemsById.clear();
+  transport.pendingTranscriptionMessages.length = 0;
   resetLatencies(transport);
   transport.status = '取得金鑰中…';
 
@@ -197,6 +201,8 @@ export async function startWebRTCTransport(transport) {
     transport.send = undefined;
     transport.pendingMessages.clear();
     transport.responsesById.clear();
+    transport.conversationItemsById.clear();
+    transport.pendingTranscriptionMessages.length = 0;
     transport.status = transport.manualStop ? '待命' : '已關閉';
     transport.manualStop = false;
     try {
@@ -271,6 +277,8 @@ export async function startWebRTCTransport(transport) {
     transport.send = undefined;
     transport.pendingMessages.clear();
     transport.responsesById.clear();
+    transport.conversationItemsById.clear();
+    transport.pendingTranscriptionMessages.length = 0;
     transport.manualStop = false;
     return;
   }

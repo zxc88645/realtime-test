@@ -22,11 +22,19 @@ function createRealtimeSessionService(dependencies) {
     throw new Error('必須提供 createOpenAIClient 函式');
   }
 
-  const createSessionPayload = (session) => ({
-    id: session?.session?.id ?? null,
-    client_secret: session?.value ?? null,
-    expires_at: session?.expires_at ?? null,
-  });
+  const createSessionPayload = (session) => {
+    const sessionId = session?.session?.id ?? session?.id ?? null;
+    const secretValue = session?.client_secret?.value ?? session?.value ?? null;
+    const expiresAt = session?.client_secret?.expires_at ?? session?.expires_at ?? null;
+
+    return {
+      id: sessionId,
+      client_secret: {
+        value: secretValue,
+        expires_at: expiresAt,
+      },
+    };
+  };
 
   const resolveRealtimeClient = async () => {
     try {
@@ -46,7 +54,7 @@ function createRealtimeSessionService(dependencies) {
       const sessionConfig = JSON.stringify({
         session: {
           type: 'realtime',
-          model: 'gpt-realtime-mini',
+          model: realtimeModel || 'gpt-realtime-mini',
           instructions: '你是個有禮貌且樂於助人的助理,始終講中文。',
           audio: {
             input: {
@@ -59,7 +67,7 @@ function createRealtimeSessionService(dependencies) {
             },
             output: {
               /* format: { type: 'audio/pcm', rate: 24000 }, */
-              voice: 'marin',
+              voice: realtimeVoice || 'marin',
               /* speed: 1.0, */
             },
           },

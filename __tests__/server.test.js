@@ -118,7 +118,7 @@ describe('createRealtimeServer', () => {
       realtime: {
         clientSecrets: {
           create: jest.fn().mockResolvedValue({
-            id: 'session-id',
+            session: { id: 'session-id' },
             client_secret: { value: 'secret-token', expires_at: 1234567890 },
           }),
         },
@@ -135,12 +135,29 @@ describe('createRealtimeServer', () => {
     const response = await request(app).post(REALTIME_CLIENT_SECRETS_PATH);
 
     expect(createOpenAIClient).toHaveBeenCalled();
-    expect(fakeClient.realtime.clientSecrets.create).toHaveBeenCalledWith({
-      model: DEFAULT_REALTIME_MODEL,
-      voice: DEFAULT_REALTIME_VOICE,
+    expect(fakeClient.realtime.clientSecrets.create).toHaveBeenCalled();
+
+    const [[rawSessionConfig]] = fakeClient.realtime.clientSecrets.create.mock.calls;
+    expect(typeof rawSessionConfig).toBe('string');
+
+    const sessionConfig = JSON.parse(rawSessionConfig);
+    expect(sessionConfig).toMatchObject({
+      session: {
+        type: 'realtime',
+        model: DEFAULT_REALTIME_MODEL,
+        audio: {
+          input: {
+            transcription: { language: 'zh' },
+          },
+          output: {
+            voice: DEFAULT_REALTIME_VOICE,
+          },
+        },
+      },
     });
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
+      id: 'session-id',
       client_secret: {
         value: 'secret-token',
         expires_at: 1234567890,

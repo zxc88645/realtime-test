@@ -53,6 +53,36 @@ function ensureResponseEntry(transport, event) {
   return entry;
 }
 
+function resolveConversationItemId(event) {
+  if (!event || typeof event !== 'object') {
+    return null;
+  }
+  return (
+    event.item_id ||
+    event.itemId ||
+    (typeof event.item?.id === 'string' ? event.item.id : null)
+  );
+}
+
+function ensureConversationItemEntry(transport, event) {
+  const itemId = resolveConversationItemId(event);
+  if (!itemId) {
+    return null;
+  }
+
+  let entry = transport.conversationItemsById.get(itemId);
+  if (!entry) {
+    const message =
+      transport.pendingTranscriptionMessages.length > 0
+        ? transport.pendingTranscriptionMessages.shift()
+        : appendMessage(transport, 'user');
+    entry = { itemId, message };
+    transport.conversationItemsById.set(itemId, entry);
+  }
+
+  return entry;
+}
+
 export function handleRealtimeEvent(transport, event) {
   if (!event || typeof event !== 'object') {
     return;
@@ -95,6 +125,45 @@ export function handleRealtimeEvent(transport, event) {
   if (event.type === 'session.created') {
     transport.status = '已連線（語音就緒）';
     return;
+  }
+
+  if (event.type === 'conversation.item.input_audio_transcription.delta') {
+    const entry = ensureConversationItemEntry(transport, event);
+    if (entry) {
+      const text = resolveDeltaText(event);
+      if (text) {
+        if (entry.message.text === '（語音訊息）') {
+          entry.message.text = '';
+        }
+        entry.message.text = `${entry.message.text || ''}${text}`;
+      }
+    }
+    return;
+  }
+
+  if (
+    event.type === 'conversation.item.input_audio_transcription.completed' ||
+    event.type === 'conversation.item.input_audio_transcription.done'
+  ) {
+    const entry = ensureConversationItemEntry(transport, event);
+    if (entry) {
+      const transcript = event.transcript || event.text || resolveDeltaText(event);
+      if (transcript) {
+        entry.message.text = transcript;
+      }
+    }
+    const itemId = resolveConversationItemId(event);
+    if (itemId) {
+      transport.conversationItemsById.delete(itemId);
+    }
+    return;
+  }
+
+  if (event.type === 'conversation.item.completed') {
+    const itemId = resolveConversationItemId(event);
+    if (itemId) {
+      transport.conversationItemsById.delete(itemId);
+    }
   }
 
   if (event.type === 'response.audio.delta') {
