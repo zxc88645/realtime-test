@@ -76,23 +76,7 @@
             <p class="note-card">切換模式後記得重新按下「連線」。</p>
           </section>
 
-          <section class="sidebar-section">
-            <h2 class="section-heading">回覆語言</h2>
-            <p class="section-subtle">套用於下一則訊息，可立即與 GPT 練習多國語言。</p>
-            <label class="select-wrapper">
-              <span class="sr-only">選擇回覆語言</span>
-              <select v-model="selectedLanguageId">
-                <option
-                  v-for="option in languageOptions"
-                  :key="option.id"
-                  :value="option.id"
-                >
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-            <p class="language-hint">{{ activeLanguage.description }}</p>
-          </section>
+
 
           <section class="sidebar-section">
             <h2 class="section-heading">連線控制</h2>

@@ -81,7 +81,7 @@ function setTransceiverDirection(transceiver, direction) {
   }
 }
 
-export async function startWebRTCTransport(transport, resolveLanguage) {
+export async function startWebRTCTransport(transport) {
   if (transport.connection) {
     try {
       transport.connection.close();
@@ -288,12 +288,9 @@ export async function startWebRTCTransport(transport, resolveLanguage) {
       return false;
     }
     const clientMessageId = crypto.randomUUID();
-    const language = typeof resolveLanguage === 'function' ? resolveLanguage() : null;
     channel.send(
       JSON.stringify(
-        buildResponseCreateEvent(message, clientMessageId, {
-          language,
-        })
+        buildResponseCreateEvent(message, clientMessageId)
       )
     );
     transport.pendingMessages.set(clientMessageId, {

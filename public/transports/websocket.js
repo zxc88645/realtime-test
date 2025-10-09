@@ -69,7 +69,7 @@ export function stopWebSocketTransport(transport) {
   }
 }
 
-export function startWebSocketTransport(transport, resolveLanguage) {
+export function startWebSocketTransport(transport) {
   if (transport.connection) {
     try {
       transport.connection.close();
@@ -228,8 +228,7 @@ export function startWebSocketTransport(transport, resolveLanguage) {
     transport.status = '等待語音回覆…';
     sendEvent({ type: 'input_audio_buffer.commit' });
     const clientMessageId = crypto.randomUUID();
-    const language = typeof resolveLanguage === 'function' ? resolveLanguage() : null;
-    const responseEvent = buildAudioResponseCreateEvent(clientMessageId, { language });
+    const responseEvent = buildAudioResponseCreateEvent(clientMessageId);
     sendEvent(responseEvent);
     transport.pendingMessages.set(clientMessageId, {
       start: performance.now(),
@@ -238,16 +237,12 @@ export function startWebSocketTransport(transport, resolveLanguage) {
     resetRecordingState();
   };
 
-  const configureSession = (language) => {
-    const instructions = ['你是一位即時語音助理，會以語音與文字同步回覆使用者。'];
-    if (language?.prompt) {
-      instructions.push(language.prompt);
-    }
+  const configureSession = () => {
     const sessionUpdate = {
       type: 'session.update',
       session: {
         type: 'realtime',
-        instructions: instructions.join('\n'),
+        instructions: '你是一位即時語音助理，會以語音與文字同步回覆使用者。',
       },
     };
     if (REALTIME_VOICE) {
@@ -421,7 +416,7 @@ export function startWebSocketTransport(transport, resolveLanguage) {
     while (queue.length && socket.readyState === WebSocket.OPEN) {
       socket.send(queue.shift());
     }
-    configureSession(typeof resolveLanguage === 'function' ? resolveLanguage() : null);
+    configureSession();
   });
 
   socket.addEventListener('message', async (event) => {
@@ -471,10 +466,7 @@ export function startWebSocketTransport(transport, resolveLanguage) {
       return false;
     }
     const clientMessageId = crypto.randomUUID();
-    const language = typeof resolveLanguage === 'function' ? resolveLanguage() : null;
-    const event = buildResponseCreateEvent(message, clientMessageId, {
-      language,
-    });
+    const event = buildResponseCreateEvent(message, clientMessageId);
     if (!sendEvent(event)) {
       return false;
     }

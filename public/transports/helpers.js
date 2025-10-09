@@ -15,33 +15,19 @@ export async function parseEventData(data) {
   throw new Error('不支援的事件資料型別');
 }
 
-export function buildResponseCreateEvent(text, clientMessageId, options = {}) {
-  const { language } = options;
-  const input = [];
-
-  if (language?.prompt) {
-    input.push({
+export function buildResponseCreateEvent(text, clientMessageId) {
+  const input = [
+    {
       type: 'message',
-      role: 'system',
+      role: 'user',
       content: [
         {
           type: 'input_text',
-          text: language.prompt,
+          text,
         },
       ],
-    });
-  }
-
-  input.push({
-    type: 'message',
-    role: 'user',
-    content: [
-      {
-        type: 'input_text',
-        text,
-      },
-    ],
-  });
+    },
+  ];
 
   const response = {
     metadata: {
@@ -56,30 +42,14 @@ export function buildResponseCreateEvent(text, clientMessageId, options = {}) {
   };
 }
 
-export function buildAudioResponseCreateEvent(clientMessageId, options = {}) {
-  const { language } = options;
-  const input = [];
-
-  if (language?.prompt) {
-    input.push({
-      type: 'message',
-      role: 'system',
-      content: [
-        {
-          type: 'input_text',
-          text: language.prompt,
-        },
-      ],
-    });
-  }
-
+export function buildAudioResponseCreateEvent(clientMessageId) {
   return {
     type: 'response.create',
     response: {
       metadata: {
         client_message_id: clientMessageId,
       },
-      input,
+      input: [],
     },
   };
 }

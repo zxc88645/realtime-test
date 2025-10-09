@@ -6,8 +6,6 @@ import {
   watch,
 } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
 import {
-  LANGUAGE_OPTIONS,
-  LANGUAGE_STORAGE_KEY,
   MODE_LABELS,
   MODE_OPTIONS,
   THEME_STORAGE_KEY,
@@ -26,48 +24,9 @@ const app = createApp({
     const messageInputRef = ref(null);
     const hasAttemptedConnection = reactive({ ws: false, webrtc: false });
     const selectedMode = ref('ws');
-    const languageOptions = LANGUAGE_OPTIONS;
 
-    const languageMap = new Map(languageOptions.map((item) => [item.id, item]));
-    const getStoredLanguage = () => {
-      try {
-        const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
-        if (stored && languageMap.has(stored)) {
-          return stored;
-        }
-      } catch (error) {
-        console.warn('讀取偏好語言時發生錯誤', error);
-      }
-      return languageOptions[0]?.id ?? 'zh-Hant';
-    };
-    const selectedLanguageId = ref(getStoredLanguage());
-    const activeLanguage = computed(
-      () => languageMap.get(selectedLanguageId.value) ?? languageOptions[0]
-    );
 
-    watch(
-      selectedLanguageId,
-      (value) => {
-        try {
-          localStorage.setItem(LANGUAGE_STORAGE_KEY, value);
-        } catch (error) {
-          console.warn('儲存偏好語言時發生錯誤', error);
-        }
-        const language = languageMap.get(value) ?? languageOptions[0];
-        if (
-          ws.configureSession &&
-          ws.connection &&
-          ws.connection.readyState === WebSocket.OPEN
-        ) {
-          try {
-            ws.configureSession(language);
-          } catch (error) {
-            console.warn('更新語音會話設定時發生錯誤', error);
-          }
-        }
-      },
-      { flush: 'post' }
-    );
+
 
     const getPreferredTheme = () => {
       try {
@@ -173,10 +132,10 @@ const app = createApp({
       hasAttemptedConnection[selectedMode.value] = true;
       if (selectedMode.value === 'ws') {
         stopWebRTCTransport(webrtc);
-        startWebSocketTransport(ws, () => activeLanguage.value);
+        startWebSocketTransport(ws);
       } else {
         stopWebSocketTransport(ws);
-        startWebRTCTransport(webrtc, () => activeLanguage.value);
+        startWebRTCTransport(webrtc);
       }
     };
 
@@ -275,9 +234,7 @@ const app = createApp({
       roleLabel,
       messageContainerClass,
       messageBubbleClass,
-      languageOptions,
-      selectedLanguageId,
-      activeLanguage,
+
       theme,
       isDarkTheme,
       toggleTheme,
