@@ -12,7 +12,8 @@
 
 ```bash
 npm install
-OPENAI_API_KEY=sk-your-key npm start
+OPENAI_API_KEY=sk-your-key 
+npm start
 ```
 
 啟動伺服器後，使用現代瀏覽器開啟 `http://localhost:3000` 並按下 **連線**。待兩種傳輸管道就緒後，輸入訊息並按下 **送出**。儀表板會即時顯示 GPT 的回覆與往返延遲，協助你掌握差異。
