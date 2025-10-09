@@ -1,5 +1,6 @@
 import { appendMessage, recordLatency } from './context.js';
 import { ensureAudioPlayer } from '../utils/audio.js';
+import { extractCompletedText, extractDeltaText } from '../utils/content.js';
 
 function ensureResponseEntry(transport, event) {
   const response = event?.response;
@@ -26,6 +27,33 @@ export function handleRealtimeEvent(transport, event) {
   if (!event || typeof event !== 'object') {
     return;
   }
+
+  const appendEntryText = (entry, text) => {
+    if (!entry || !text) {
+      return;
+    }
+    entry.message.text = `${entry.message.text || ''}${text}`;
+  };
+
+  const resolveDeltaText = (currentEvent) => {
+    if (!currentEvent) {
+      return '';
+    }
+    if (typeof currentEvent.delta === 'string') {
+      return currentEvent.delta;
+    }
+    if (
+      currentEvent.delta &&
+      typeof currentEvent.delta === 'object' &&
+      typeof currentEvent.delta.transcript === 'string'
+    ) {
+      return currentEvent.delta.transcript;
+    }
+    if (typeof currentEvent.transcript === 'string') {
+      return currentEvent.transcript;
+    }
+    return extractDeltaText(currentEvent);
+  };
 
   if (event.type === 'error') {
     const message = event.error?.message || event.message || '發生未知的即時錯誤';
@@ -56,25 +84,37 @@ export function handleRealtimeEvent(transport, event) {
 
   if (event.type === 'response.text.delta') {
     const entry = ensureResponseEntry(transport, event);
-    if (entry && event.delta) {
-      entry.message.text = `${entry.message.text || ''}${event.delta}`;
-    }
+    appendEntryText(entry, resolveDeltaText(event));
     return;
   }
 
   if (event.type === 'response.audio_transcript.delta') {
     const entry = ensureResponseEntry(transport, event);
-    if (entry && event.delta) {
-      entry.message.text = `${entry.message.text || ''}${event.delta}`;
-    }
+    appendEntryText(entry, resolveDeltaText(event));
     return;
   }
 
   if (event.type === 'response.output_audio_transcript.done') {
-    debugger;
     const entry = ensureResponseEntry(transport, event);
     if (entry && event.transcript) {
       entry.message.text = event.transcript;
+    }
+    return;
+  }
+
+  if (event.type === 'response.output_text.delta') {
+    const entry = ensureResponseEntry(transport, event);
+    appendEntryText(entry, resolveDeltaText(event));
+    return;
+  }
+
+  if (event.type === 'response.output_text.done') {
+    const entry = ensureResponseEntry(transport, event);
+    if (entry) {
+      const completedText = extractCompletedText(event, entry.message.text || '');
+      if (completedText) {
+        entry.message.text = completedText;
+      }
     }
     return;
   }
