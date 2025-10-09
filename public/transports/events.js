@@ -2,23 +2,53 @@ import { appendMessage, recordLatency } from './context.js';
 import { ensureAudioPlayer } from '../utils/audio.js';
 import { extractCompletedText, extractDeltaText } from '../utils/content.js';
 
-function ensureResponseEntry(transport, event) {
-  const response = event?.response;
-  if (!response?.id) {
+function resolveResponseId(event) {
+  if (!event || typeof event !== 'object') {
     return null;
   }
-  let entry = transport.responsesById.get(response.id);
+  const response = event.response;
+  return (
+    response?.id ||
+    event.response_id ||
+    event.responseId ||
+    (typeof event.item_id === 'string' && event.item_id.startsWith('resp_')
+      ? event.item_id.replace(/^resp_/, '')
+      : null)
+  );
+}
+
+function extractClientMessageId(event) {
+  const response = event?.response;
+  const metadata =
+    response?.metadata || event?.response_metadata || event?.metadata || {};
+  return metadata?.client_message_id || event?.client_message_id || null;
+}
+
+function ensureResponseEntry(transport, event) {
+  const responseId = resolveResponseId(event);
+  if (!responseId) {
+    return null;
+  }
+
+  let entry = transport.responsesById.get(responseId);
   if (!entry) {
-    const clientMessageId = response.metadata?.client_message_id;
+    const clientMessageId = extractClientMessageId(event);
     const messageRole = transport.id === 'ws' ? 'gpt-ws' : 'gpt-webrtc';
     const message = appendMessage(transport, messageRole);
     entry = {
+      responseId,
       clientMessageId,
       message,
     };
-    transport.responsesById.set(response.id, entry);
-  } else if (!entry.clientMessageId && response.metadata?.client_message_id) {
-    entry.clientMessageId = response.metadata.client_message_id;
+    transport.responsesById.set(responseId, entry);
+  } else {
+    entry.responseId = entry.responseId || responseId;
+    if (!entry.clientMessageId) {
+      const clientMessageId = extractClientMessageId(event);
+      if (clientMessageId) {
+        entry.clientMessageId = clientMessageId;
+      }
+    }
   }
   return entry;
 }
@@ -126,8 +156,13 @@ export function handleRealtimeEvent(transport, event) {
       recordLatency(transport, performance.now() - started);
       transport.pendingMessages.delete(entry.clientMessageId);
     }
-    if (event.response?.id) {
-      transport.responsesById.delete(event.response.id);
+    if (entry?.responseId) {
+      transport.responsesById.delete(entry.responseId);
+    } else {
+      const responseId = resolveResponseId(event);
+      if (responseId) {
+        transport.responsesById.delete(responseId);
+      }
     }
     if (transport.id === 'ws' && transport.connection) {
       transport.status = '已連線（語音就緒）';
