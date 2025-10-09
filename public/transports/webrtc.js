@@ -1,6 +1,6 @@
 import {
   REALTIME_BASE_URL,
-  REALTIME_EPHEMERAL_PATH,
+  REALTIME_CLIENT_SECRETS_PATH,
   REALTIME_MODEL,
 } from '../constants.js';
 import { appendMessage, resetLatencies } from './context.js';
@@ -100,7 +100,7 @@ export async function startWebRTCTransport(transport) {
 
   let token;
   try {
-    const response = await fetch(REALTIME_EPHEMERAL_PATH, {
+    const response = await fetch(REALTIME_CLIENT_SECRETS_PATH, {
       method: 'POST',
     });
     if (!response.ok) {
@@ -240,17 +240,14 @@ export async function startWebRTCTransport(transport) {
 
     transport.status = '協商中…';
 
-    const answerResponse = await fetch(
-      `${REALTIME_BASE_URL}/calls`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/sdp',
-        },
-        body: offerSdp,
-      }
-    );
+    const answerResponse = await fetch(`${REALTIME_BASE_URL}/calls`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/sdp',
+      },
+      body: offerSdp,
+    });
 
     if (!answerResponse.ok) {
       const errorText = await answerResponse.text();
@@ -288,11 +285,7 @@ export async function startWebRTCTransport(transport) {
       return false;
     }
     const clientMessageId = crypto.randomUUID();
-    channel.send(
-      JSON.stringify(
-        buildResponseCreateEvent(message, clientMessageId)
-      )
-    );
+    channel.send(JSON.stringify(buildResponseCreateEvent(message, clientMessageId)));
     transport.pendingMessages.set(clientMessageId, {
       start: performance.now(),
     });

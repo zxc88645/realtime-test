@@ -5,11 +5,7 @@ import {
   ref,
   watch,
 } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
-import {
-  MODE_LABELS,
-  MODE_OPTIONS,
-  THEME_STORAGE_KEY,
-} from './constants.js';
+import { MODE_LABELS, MODE_OPTIONS, THEME_STORAGE_KEY } from './constants.js';
 import { messageBubbleClass, messageContainerClass, roleLabel } from './ui/messages.js';
 import { createTransportContext, appendMessage } from './transports/context.js';
 import {
@@ -24,9 +20,6 @@ const app = createApp({
     const messageInputRef = ref(null);
     const hasAttemptedConnection = reactive({ ws: false, webrtc: false });
     const selectedMode = ref('ws');
-
-
-
 
     const getPreferredTheme = () => {
       try {

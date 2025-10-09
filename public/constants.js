@@ -1,12 +1,11 @@
 export const REALTIME_MODEL = 'gpt-4o-realtime-preview-2024-12-17';
 export const REALTIME_BASE_URL = 'https://api.openai.com/v1/realtime';
 export const REALTIME_WS_PATH = '/openai/agents/realtime/ws';
-export const REALTIME_EPHEMERAL_PATH = '/openai/agents/realtime/ephemeral-token';
+export const REALTIME_CLIENT_SECRETS_PATH = '/v1/realtime/client_secrets';
 export const REALTIME_VOICE = 'verse';
 export const AUDIO_SAMPLE_RATE = 24000;
 
 export const THEME_STORAGE_KEY = 'realtime-preferred-theme';
-
 
 export const ROLE_LABELS = {
   user: '你',

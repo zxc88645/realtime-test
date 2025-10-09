@@ -4,7 +4,7 @@ const {
   DEFAULT_REALTIME_MODEL,
   DEFAULT_REALTIME_VOICE,
 } = require('../src/config/constants');
-const { createRealtimeServer, REALTIME_EPHEMERAL_PATH } = require('../server');
+const { createRealtimeServer, REALTIME_CLIENT_SECRETS_PATH } = require('../server');
 const {
   createRealtimeWebSocketHandler,
 } = require('../src/websocket/createRealtimeWebSocketHandler');
@@ -99,7 +99,7 @@ describe('createRealtimeServer', () => {
   test('回報缺少金鑰的錯誤訊息', async () => {
     const { app, server } = createRealtimeServer({ apiKey: null });
 
-    const response = await request(app).post(REALTIME_EPHEMERAL_PATH);
+    const response = await request(app).post(REALTIME_CLIENT_SECRETS_PATH);
 
     expect(response.status).toBe(500);
     expect(response.body).toEqual({ error: '伺服器缺少 OPENAI_API_KEY' });
@@ -132,7 +132,7 @@ describe('createRealtimeServer', () => {
       createOpenAIClient,
     });
 
-    const response = await request(app).post(REALTIME_EPHEMERAL_PATH);
+    const response = await request(app).post(REALTIME_CLIENT_SECRETS_PATH);
 
     expect(createOpenAIClient).toHaveBeenCalled();
     expect(fakeClient.realtime.clientSecrets.create).toHaveBeenCalledWith({
@@ -141,9 +141,10 @@ describe('createRealtimeServer', () => {
     });
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
-      id: 'session-id',
-      client_secret: { value: 'secret-token', expires_at: 1234567890 },
-      expires_at: 1234567890,
+      client_secret: {
+        value: 'secret-token',
+        expires_at: 1234567890,
+      },
     });
 
     try {
@@ -175,7 +176,7 @@ describe('createRealtimeServer', () => {
       createOpenAIClient,
     });
 
-    const response = await request(app).post(REALTIME_EPHEMERAL_PATH);
+    const response = await request(app).post(REALTIME_CLIENT_SECRETS_PATH);
 
     expect(createOpenAIClient).toHaveBeenCalled();
     expect(fakeClient.realtime.clientSecrets.create).toHaveBeenCalled();

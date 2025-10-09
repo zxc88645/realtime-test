@@ -13,7 +13,7 @@ const OPENAI_REALTIME_BASE_URL = 'https://api.openai.com/v1/realtime';
 
 const REALTIME_PATH = '/openai/agents/realtime';
 const REALTIME_WS_PATH = `${REALTIME_PATH}/ws`;
-const REALTIME_EPHEMERAL_PATH = `${REALTIME_PATH}/ephemeral-token`;
+const REALTIME_CLIENT_SECRETS_PATH = '/v1/realtime/client_secrets';
 
 const DEFAULT_PUBLIC_DIRECTORY = path.join(__dirname, '..', '..', 'public');
 
@@ -25,6 +25,6 @@ module.exports = {
   OPENAI_REALTIME_BASE_URL,
   REALTIME_PATH,
   REALTIME_WS_PATH,
-  REALTIME_EPHEMERAL_PATH,
+  REALTIME_CLIENT_SECRETS_PATH,
   DEFAULT_PUBLIC_DIRECTORY,
 };

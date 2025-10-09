@@ -1,4 +1,4 @@
-const { REALTIME_EPHEMERAL_PATH } = require('../config/constants');
+const { REALTIME_CLIENT_SECRETS_PATH } = require('../config/constants');
 const {
   createRealtimeSessionService,
   RealtimeSessionError,
@@ -23,7 +23,7 @@ function registerEphemeralTokenRoute(app, dependencies) {
       })
   );
 
-  app.post(REALTIME_EPHEMERAL_PATH, async (_req, res) => {
+  app.post(REALTIME_CLIENT_SECRETS_PATH, async (_req, res) => {
     if (!apiKey) {
       res.status(500).json({ error: '伺服器缺少 OPENAI_API_KEY' });
       return;
