@@ -33,6 +33,8 @@ export function stopWebSocketTransport(transport) {
   transport.isReady = false;
   transport.pendingMessages.clear();
   transport.responsesById.clear();
+  transport.conversationItemsById.clear();
+  transport.pendingTranscriptionMessages.length = 0;
   if (transport.audioPlayer) {
     transport.audioPlayer.reset().catch((error) => {
       console.warn('重設即時音訊播放器失敗', error);
@@ -95,6 +97,8 @@ export function startWebSocketTransport(transport) {
   transport.isReady = false;
   transport.pendingMessages.clear();
   transport.responsesById.clear();
+  transport.conversationItemsById.clear();
+  transport.pendingTranscriptionMessages.length = 0;
   transport.startRecording = undefined;
   transport.stopRecording = undefined;
   transport.cancelRecording = undefined;
@@ -233,7 +237,8 @@ export function startWebSocketTransport(transport) {
     transport.pendingMessages.set(clientMessageId, {
       start: performance.now(),
     });
-    appendMessage(transport, 'user', '（語音訊息）');
+    const message = appendMessage(transport, 'user', '（語音訊息）');
+    transport.pendingTranscriptionMessages.push(message);
     resetRecordingState();
   };
 
@@ -436,6 +441,8 @@ export function startWebSocketTransport(transport) {
     transport.send = undefined;
     transport.pendingMessages.clear();
     transport.responsesById.clear();
+    transport.conversationItemsById.clear();
+    transport.pendingTranscriptionMessages.length = 0;
     if (transport.audioPlayer) {
       transport.audioPlayer.reset().catch((error) => {
         console.warn('重設即時音訊播放器失敗', error);

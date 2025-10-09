@@ -15,6 +15,8 @@ export function createTransportContext(id) {
     latencies: [],
     pendingMessages: new Map(),
     responsesById: new Map(),
+    conversationItemsById: new Map(),
+    pendingTranscriptionMessages: [],
     manualStop: false,
     localStream: null,
     remoteStream: null,
