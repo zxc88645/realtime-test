@@ -233,6 +233,7 @@ export async function startWebRTCTransport(transport, resolveLanguage) {
       }, 2000);
     });
 
+    debugger;
     const offerSdp = peerConnection.localDescription?.sdp;
     if (!offerSdp) {
       throw new Error('缺少本地 SDP offer');
@@ -241,7 +242,7 @@ export async function startWebRTCTransport(transport, resolveLanguage) {
     transport.status = '協商中…';
 
     const answerResponse = await fetch(
-      `${REALTIME_BASE_URL}?model=${encodeURIComponent(REALTIME_MODEL)}`,
+      `${REALTIME_BASE_URL}/calls`,
       {
         method: 'POST',
         headers: {

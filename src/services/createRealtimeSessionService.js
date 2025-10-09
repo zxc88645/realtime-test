@@ -23,9 +23,9 @@ function createRealtimeSessionService(dependencies) {
   }
 
   const createSessionPayload = (session) => ({
-    id: session?.id ?? null,
-    client_secret: session?.client_secret ?? null,
-    expires_at: session?.client_secret?.expires_at ?? null,
+    id: session?.session?.id ?? null,
+    client_secret: session?.value ?? null,
+    expires_at: session?.expires_at ?? null,
   });
 
   const resolveRealtimeClient = async () => {
@@ -43,7 +43,19 @@ function createRealtimeSessionService(dependencies) {
   const createSession = async () => {
     const { create } = await resolveRealtimeClient();
     try {
-      const session = await create({ model: realtimeModel, voice: realtimeVoice });
+      const sessionConfig = JSON.stringify({
+        session: {
+          type: 'realtime',
+          model: 'gpt-realtime',
+          instructions: '你是個有禮貌且樂於助人的助理,始終講中文。',
+          audio: {
+            output: {
+              voice: 'marin',
+            },
+          },
+        },
+      });
+      const session = await create(sessionConfig);
       return createSessionPayload(session);
     } catch (error) {
       if (typeof error?.status === 'number') {
