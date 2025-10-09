@@ -46,7 +46,7 @@ function createRealtimeSessionService(dependencies) {
       const sessionConfig = JSON.stringify({
         session: {
           type: 'realtime',
-          model: 'gpt-realtime',
+          model: 'gpt-realtime-mini',
           instructions: '你是個有禮貌且樂於助人的助理,始終講中文。',
           audio: {
             input: {
