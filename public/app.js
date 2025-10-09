@@ -19,7 +19,7 @@ const app = createApp({
     const message = ref('');
     const messageInputRef = ref(null);
     const hasAttemptedConnection = reactive({ ws: false, webrtc: false });
-    const selectedMode = ref('ws');
+    const selectedMode = ref('webrtc');
 
     const getPreferredTheme = () => {
       try {

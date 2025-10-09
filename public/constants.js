@@ -20,11 +20,11 @@ export const MODE_LABELS = {
 };
 
 export const MODE_OPTIONS = [
-  {
-    id: 'ws',
-    label: MODE_LABELS.ws,
-    description: '透過伺服器橋接至 OpenAI Realtime API，支援語音與文字即時互動。',
-  },
+  // {
+  //   id: 'ws',
+  //   label: MODE_LABELS.ws,
+  //   description: '透過伺服器橋接至 OpenAI Realtime API，支援語音與文字即時互動。',
+  // },
   {
     id: 'webrtc',
     label: MODE_LABELS.webrtc,
