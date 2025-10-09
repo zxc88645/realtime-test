@@ -70,6 +70,15 @@ export function handleRealtimeEvent(transport, event) {
     return;
   }
 
+  if (event.type === 'response.output_audio_transcript.done') {
+    debugger;
+    const entry = ensureResponseEntry(transport, event);
+    if (entry && event.transcript) {
+      entry.message.text = event.transcript;
+    }
+    return;
+  }
+
   if (event.type === 'response.done') {
     const entry = ensureResponseEntry(transport, event);
     if (entry?.clientMessageId && transport.pendingMessages.has(entry.clientMessageId)) {

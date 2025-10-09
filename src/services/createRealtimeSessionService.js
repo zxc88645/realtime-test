@@ -49,8 +49,18 @@ function createRealtimeSessionService(dependencies) {
           model: 'gpt-realtime',
           instructions: '你是個有禮貌且樂於助人的助理,始終講中文。',
           audio: {
+            input: {
+              /*               format: { type: 'audio/pcm', rate: 24000 },
+              turn_detection: { type: 'server_vad' }, */
+              transcription: {
+                language: 'zh',
+                model: 'gpt-4o-mini-transcribe',
+              },
+            },
             output: {
+              /* format: { type: 'audio/pcm', rate: 24000 }, */
               voice: 'marin',
+              /* speed: 1.0, */
             },
           },
         },
