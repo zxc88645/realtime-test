@@ -233,7 +233,6 @@ export async function startWebRTCTransport(transport, resolveLanguage) {
       }, 2000);
     });
 
-    debugger;
     const offerSdp = peerConnection.localDescription?.sdp;
     if (!offerSdp) {
       throw new Error('缺少本地 SDP offer');
