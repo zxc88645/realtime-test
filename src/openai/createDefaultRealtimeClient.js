@@ -15,7 +15,7 @@ function createDefaultRealtimeClient(options) {
     realtime: {
       clientSecrets: {
         async create(sessionConfig) {
-          const response = await fetch(`${realtimeBaseUrl}/sessions`, {
+          const response = await fetch(`${realtimeBaseUrl}/client_secrets`, {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${apiKey}`,

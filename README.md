@@ -19,7 +19,7 @@ OPENAI_API_KEY=sk-your-key npm start
 
 ## 運作方式
 
-- `server.js` 會提供 `public/` 內的靜態資源、將 WebSocket 流量代理至 `wss://api.openai.com/v1/realtime`，並透過 `POST /v1/realtime/sessions` 簽發短效 WebRTC 金鑰。
+- `server.js` 會提供 `public/` 內的靜態資源、將 WebSocket 流量代理至 `wss://api.openai.com/v1/realtime`，並透過 `POST /v1/realtime/client_secrets` 簽發短效 WebRTC 金鑰。
 - `public/app.js` 會同時開啟兩種傳輸，當你送出提示時發送相同的 `response.create` 事件，並記錄從送出到模型觸發 `response.completed` 的延遲。
 - `public/styles.css` 與 `public/index.html` 提供儀表板，讓你並排比較雙方的對話與延遲。
 
